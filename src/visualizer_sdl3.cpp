@@ -4,6 +4,7 @@
 
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <iostream>
@@ -189,6 +190,121 @@ void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const TaskConfi
     draw_text(renderer, 16, "learn", right - 140.0F, top + 108.0F, SDL_Color{185, 145, 255, 255});
 }
 
+float image_white_point(std::span<const float> values) {
+    const std::size_t dims = std::min<std::size_t>(784U, values.size());
+    float white = 0.0F;
+    for (std::size_t i = 0; i < dims; ++i) {
+        white = std::max(white, std::fabs(values[i]));
+    }
+    return std::max(white, 1.0e-6F);
+}
+
+void draw_state_image(SDL_Renderer* renderer, std::span<const float> values, float x, float y,
+                      float scale, float white_point, bool signed_values) {
+    constexpr std::size_t kImageSize = 28;
+    if (values.size() < kImageSize * kImageSize) {
+        return;
+    }
+
+    for (std::size_t row = 0; row < kImageSize; ++row) {
+        for (std::size_t col = 0; col < kImageSize; ++col) {
+            const float value = values[(row * kImageSize) + col];
+            if (signed_values && value < 0.0F) {
+                const float intensity = std::clamp(-value / white_point, 0.0F, 1.0F);
+                SDL_SetRenderDrawColor(renderer, static_cast<Uint8>(std::lround(80.0F * intensity)),
+                                       static_cast<Uint8>(std::lround(150.0F * intensity)),
+                                       static_cast<Uint8>(std::lround(255.0F * intensity)), 255);
+            } else {
+                const float intensity = std::clamp(value / white_point, 0.0F, 1.0F);
+                const Uint8 channel = static_cast<Uint8>(std::lround(255.0F * intensity));
+                SDL_SetRenderDrawColor(renderer, channel, channel, channel, 255);
+            }
+            const SDL_FRect pixel{
+                .x = x + (static_cast<float>(col) * scale),
+                .y = y + (static_cast<float>(row) * scale),
+                .w = scale,
+                .h = scale,
+            };
+            SDL_RenderFillRect(renderer, &pixel);
+        }
+    }
+}
+
+void draw_probe(SDL_Renderer* renderer, const Model& model, const TaskDataset& dataset,
+                std::span<const float> state, std::size_t sample_index, bool input_enabled,
+                bool paused, std::size_t tick_count, std::size_t ticks_per_frame, int width,
+                int height) {
+    SDL_SetRenderDrawColor(renderer, 14, 16, 20, 255);
+    SDL_RenderClear(renderer);
+
+    if (dataset.test.empty()) {
+        draw_text(renderer, 20, "no test samples", 20.0F, 20.0F, SDL_Color{240, 240, 240, 255});
+        return;
+    }
+
+    const TaskSample& sample = dataset.test[sample_index % dataset.test.size()];
+    const float panel_scale = std::max(
+        4.0F, std::min(static_cast<float>(width) / 145.0F, static_cast<float>(height) / 58.0F));
+    const float image_size = 28.0F * panel_scale;
+    const float top = 96.0F;
+    const float gap = 28.0F;
+    const float left = 28.0F;
+
+    const float original_white = image_white_point(sample.input);
+    const float state_white = image_white_point(state);
+    std::vector<float> input_view(sample.input.size(), 0.0F);
+    if (input_enabled) {
+        input_view = sample.input;
+    }
+
+    std::vector<float> diff(784U, 0.0F);
+    for (std::size_t i = 0; i < diff.size() && i < state.size() && i < sample.input.size(); ++i) {
+        diff[i] = state[i] - sample.input[i];
+    }
+    const float diff_white = image_white_point(diff);
+
+    const float x0 = left;
+    const float x1 = x0 + image_size + gap;
+    const float x2 = x1 + image_size + gap;
+    const float x3 = x2 + image_size + gap;
+
+    draw_text(renderer, 18, "original", x0, top - 28.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 18, "input socket", x1, top - 28.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 18, "VVM state", x2, top - 28.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 18, "state-original", x3, top - 28.0F, SDL_Color{235, 240, 245, 255});
+
+    draw_state_image(renderer, sample.input, x0, top, panel_scale, original_white, false);
+    draw_state_image(renderer, input_view, x1, top, panel_scale, original_white, false);
+    draw_state_image(renderer, state, x2, top, panel_scale, state_white, true);
+    draw_state_image(renderer, diff, x3, top, panel_scale, diff_white, true);
+
+    char overlay[1024];
+    std::snprintf(
+        overlay, sizeof(overlay),
+        "visualize-probe  sample=%zu/%zu label=%d  tick=%zu  mode=%s  input=%s  "
+        "ticks/frame=%zu\n"
+        "keys: space pause  n/p sample  i input  r reset  . step  +/- clock  0 jump zero  "
+        "1 jump one\n"
+        "params=%zu  ops=%zu  d=%zu  state_white=%.5f",
+        sample_index, dataset.test.size(), sample.label, tick_count, paused ? "paused" : "running",
+        input_enabled ? "on" : "off", ticks_per_frame, model.parameter_count(),
+        model.config().num_ops, model.config().state_dim, static_cast<double>(state_white));
+    draw_text(renderer, 18, overlay, 20.0F, 18.0F, SDL_Color{235, 240, 245, 255});
+}
+
+std::size_t find_next_label(std::span<const TaskSample> samples, std::size_t start, int label) {
+    if (samples.empty()) {
+        return 0U;
+    }
+    for (std::size_t offset = 1; offset <= samples.size(); ++offset) {
+        const std::size_t index = (start + offset) % samples.size();
+        if (samples[index].label == label) {
+            return index;
+        }
+    }
+    return start;
+}
+
 } // namespace
 
 int run_visualizer(const Config& config) {
@@ -287,6 +403,128 @@ int run_training_visualizer(const Config& config, const TaskConfig& task_config,
         std::cout << "trained " << history.size() << " epochs train_loss=" << latest.train_loss
                   << " self_loss=" << latest.self_loss << " test_loss=" << latest.test_loss << '\n';
     }
+    return 0;
+}
+
+int run_probe_visualizer(const Config& config, const TaskConfig& task_config, std::size_t epochs,
+                         bool restore_best, bool anchor_to_best) {
+    Model model(config);
+    const TaskDataset dataset = make_task_dataset(config, task_config);
+    const std::vector<float> initial_bank(model.op_bank().begin(), model.op_bank().end());
+    std::vector<float> best_bank;
+    float best_balanced_accuracy = -1.0F;
+
+    std::cout << "training probe model for " << epochs << " epochs...\n";
+    for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
+        std::span<const float> op_anchor = {};
+        if (task_config.op_anchor_scale > 0.0F) {
+            if (anchor_to_best && !best_bank.empty()) {
+                op_anchor = best_bank;
+            } else if (!anchor_to_best) {
+                op_anchor = initial_bank;
+            }
+        }
+        const LossPoint loss =
+            train_task_epoch(model, dataset.train, dataset.test, task_config, epoch, op_anchor);
+        std::cout << "epoch " << epoch << " balanced=" << (100.0F * loss.test_balanced_accuracy)
+                  << "% class_ce=" << loss.test_class_cross_entropy << " loss=" << loss.test_loss
+                  << '\n';
+        if (loss.accuracy_samples > 0U && loss.test_balanced_accuracy > best_balanced_accuracy) {
+            best_balanced_accuracy = loss.test_balanced_accuracy;
+            if (restore_best || anchor_to_best) {
+                best_bank.assign(model.op_bank().begin(), model.op_bank().end());
+            }
+        }
+    }
+    if (restore_best && !best_bank.empty()) {
+        model.replace_op_bank(best_bank);
+    }
+
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        throw_sdl_error("SDL_Init failed");
+    }
+
+    SDL_Window* window = nullptr;
+    SDL_Renderer* renderer = nullptr;
+    if (!SDL_CreateWindowAndRenderer("vvm live probe", 1320, 560, SDL_WINDOW_RESIZABLE, &window,
+                                     &renderer)) {
+        SDL_Quit();
+        throw_sdl_error("SDL_CreateWindowAndRenderer failed");
+    }
+    init_text_subsystem();
+
+    std::vector<float> state = neutral_state(config.state_dim);
+    std::mt19937 rng(config.seed ^ 0xC0FFEEU);
+    std::size_t sample_index = 0;
+    std::size_t tick_count = 0;
+    std::size_t ticks_per_frame = 1;
+    bool input_enabled = true;
+    bool paused = false;
+    bool running = true;
+    bool single_step = false;
+
+    while (running) {
+        SDL_Event event{};
+        while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_EVENT_QUIT) {
+                running = false;
+            } else if (event.type == SDL_EVENT_KEY_DOWN) {
+                const SDL_Keycode key = event.key.key;
+                if (key == SDLK_ESCAPE || key == SDLK_Q) {
+                    running = false;
+                } else if (key == SDLK_SPACE) {
+                    paused = !paused;
+                } else if (key == SDLK_I) {
+                    input_enabled = !input_enabled;
+                } else if (key == SDLK_R) {
+                    state = neutral_state(config.state_dim);
+                    tick_count = 0;
+                } else if (key == SDLK_PERIOD) {
+                    single_step = true;
+                } else if (key == SDLK_N && !dataset.test.empty()) {
+                    sample_index = (sample_index + 1U) % dataset.test.size();
+                } else if (key == SDLK_P && !dataset.test.empty()) {
+                    sample_index =
+                        sample_index == 0U ? dataset.test.size() - 1U : sample_index - 1U;
+                } else if (key == SDLK_EQUALS || key == SDLK_PLUS) {
+                    ticks_per_frame = std::min<std::size_t>(256U, ticks_per_frame + 1U);
+                } else if (key == SDLK_MINUS) {
+                    ticks_per_frame = std::max<std::size_t>(1U, ticks_per_frame - 1U);
+                } else if (key == SDLK_0) {
+                    sample_index = find_next_label(dataset.test, sample_index, 0);
+                } else if (key == SDLK_1) {
+                    sample_index = find_next_label(dataset.test, sample_index, 1);
+                }
+            }
+        }
+
+        if (!dataset.test.empty() && (!paused || single_step)) {
+            const TaskSample& sample = dataset.test[sample_index % dataset.test.size()];
+            const std::size_t ticks = single_step ? 1U : ticks_per_frame;
+            for (std::size_t i = 0; i < ticks; ++i) {
+                if (input_enabled) {
+                    static_cast<void>(model.tick(state, rng, tick_count, sample.input));
+                } else {
+                    static_cast<void>(model.tick(state, rng, tick_count));
+                }
+                ++tick_count;
+            }
+            single_step = false;
+        }
+
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSizeInPixels(window, &width, &height);
+        draw_probe(renderer, model, dataset, state, sample_index, input_enabled, paused, tick_count,
+                   ticks_per_frame, width, height);
+        SDL_RenderPresent(renderer);
+        SDL_Delay(16);
+    }
+
+    shutdown_text_subsystem();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
     return 0;
 }
 

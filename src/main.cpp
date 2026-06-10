@@ -21,6 +21,8 @@ namespace vvm {
 int run_visualizer(const Config& config);
 int run_training_visualizer(const Config& config, const TaskConfig& task_config,
                             std::size_t epochs);
+int run_probe_visualizer(const Config& config, const TaskConfig& task_config, std::size_t epochs,
+                         bool restore_best, bool anchor_to_best);
 } // namespace vvm
 #endif
 
@@ -74,7 +76,8 @@ void print_usage() {
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm visualize-train [--epochs N] [--train-samples N] [--test-samples N] "
-                 "[--sample-frames N] [--idle-frames N] [--window N] [--lr F]\n";
+                 "[--sample-frames N] [--idle-frames N] [--window N] [--lr F]\n"
+              << "  vvm visualize-probe [--epochs N] [train-task options]\n";
     std::cout << "notes:\n"
               << "  deadzone is the main VVM activation. relu, leaky-relu, and clamp are "
                  "ablation/control modes.\n";
@@ -1350,6 +1353,16 @@ int main(int argc, char** argv) {
         if (command == "visualize-train") {
 #ifdef VVM_WITH_SDL3
             return vvm::run_training_visualizer(config, task_config, cli_options.epochs);
+#else
+            std::cerr << "visualizer was not built. Reconfigure with cmake --preset dev-sdl3.\n";
+            return 2;
+#endif
+        }
+
+        if (command == "visualize-probe") {
+#ifdef VVM_WITH_SDL3
+            return vvm::run_probe_visualizer(config, task_config, cli_options.epochs,
+                                             cli_options.restore_best, cli_options.anchor_to_best);
 #else
             std::cerr << "visualizer was not built. Reconfigure with cmake --preset dev-sdl3.\n";
             return 2;
