@@ -550,21 +550,6 @@ float class_score(std::span<const float> state, int class_count, std::size_t cla
     return score;
 }
 
-int predicted_class(std::span<const float> state, int class_count, std::size_t class_dims,
-                    std::size_t class_offset, VectorRange range) {
-    int best = 0;
-    float best_score = -std::numeric_limits<float>::infinity();
-    for (int candidate = 0; candidate < class_count; ++candidate) {
-        const float score =
-            class_score(state, class_count, class_dims, class_offset, range, candidate);
-        if (score > best_score) {
-            best = candidate;
-            best_score = score;
-        }
-    }
-    return best;
-}
-
 void record_tick_diagnostics(const Tick& tick, const TaskSample& sample, std::size_t num_ops,
                              LossPoint& loss) {
     loss.state_heat_l2 += tick.state_heat_l2;
@@ -840,8 +825,10 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
     float loss_sum = 0.0F;
     float nonclass_loss_sum = 0.0F;
     float class_loss_sum = 0.0F;
+    float class_cross_entropy_sum = 0.0F;
     std::size_t nonclass_loss_samples = 0;
     std::size_t class_loss_samples = 0;
+    std::size_t class_cross_entropy_samples = 0;
     float class_margin_sum = 0.0F;
     std::size_t correct = 0;
     std::size_t accuracy_samples = 0;
@@ -896,21 +883,39 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
                 ++nonclass_loss_samples;
             }
 
-            const int predicted =
-                predicted_class(state, samples[i].class_count, samples[i].class_dims,
-                                samples[i].class_offset, task_config.vector_range);
-            const float label_score =
-                class_score(state, samples[i].class_count, samples[i].class_dims,
-                            samples[i].class_offset, task_config.vector_range, samples[i].label);
+            std::vector<float> class_scores(static_cast<std::size_t>(samples[i].class_count), 0.0F);
+            int predicted = 0;
+            float best_score = -std::numeric_limits<float>::infinity();
+            for (int candidate = 0; candidate < samples[i].class_count; ++candidate) {
+                const float score =
+                    class_score(state, samples[i].class_count, samples[i].class_dims,
+                                samples[i].class_offset, task_config.vector_range, candidate);
+                class_scores[static_cast<std::size_t>(candidate)] = score;
+                if (score > best_score) {
+                    best_score = score;
+                    predicted = candidate;
+                }
+            }
+            const float label_score = class_scores[static_cast<std::size_t>(samples[i].label)];
+            const float max_class_score =
+                *std::max_element(class_scores.begin(), class_scores.end());
+            float exp_sum = 0.0F;
+            for (const float score : class_scores) {
+                exp_sum += std::exp(score - max_class_score);
+            }
+            if (exp_sum > 0.0F) {
+                const float label_probability =
+                    std::max(std::exp(label_score - max_class_score) / exp_sum, 1.0e-8F);
+                class_cross_entropy_sum += -std::log(label_probability);
+                ++class_cross_entropy_samples;
+            }
             float best_other_score = -std::numeric_limits<float>::infinity();
             for (int candidate = 0; candidate < samples[i].class_count; ++candidate) {
                 if (candidate == samples[i].label) {
                     continue;
                 }
-                best_other_score = std::max(
-                    best_other_score,
-                    class_score(state, samples[i].class_count, samples[i].class_dims,
-                                samples[i].class_offset, task_config.vector_range, candidate));
+                best_other_score =
+                    std::max(best_other_score, class_scores[static_cast<std::size_t>(candidate)]);
             }
             class_margin_sum += label_score - best_other_score;
             const bool is_correct = predicted == samples[i].label;
@@ -949,6 +954,10 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
         .class_loss = class_loss_samples == 0U
                           ? 0.0F
                           : class_loss_sum / static_cast<float>(class_loss_samples),
+        .class_cross_entropy =
+            class_cross_entropy_samples == 0U
+                ? 0.0F
+                : class_cross_entropy_sum / static_cast<float>(class_cross_entropy_samples),
         .accuracy = accuracy_samples == 0U
                         ? 0.0F
                         : static_cast<float>(correct) / static_cast<float>(accuracy_samples),
@@ -976,6 +985,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         loss.test_loss = metrics.loss;
         loss.test_nonclass_loss = metrics.nonclass_loss;
         loss.test_class_loss = metrics.class_loss;
+        loss.test_class_cross_entropy = metrics.class_cross_entropy;
         loss.test_accuracy = metrics.accuracy;
         loss.test_balanced_accuracy = metrics.balanced_accuracy;
         loss.accuracy_samples = metrics.accuracy_samples;
@@ -1103,6 +1113,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     diagnostics.test_loss = metrics.loss;
     diagnostics.test_nonclass_loss = metrics.nonclass_loss;
     diagnostics.test_class_loss = metrics.class_loss;
+    diagnostics.test_class_cross_entropy = metrics.class_cross_entropy;
     diagnostics.test_accuracy = metrics.accuracy;
     diagnostics.test_balanced_accuracy = metrics.balanced_accuracy;
     diagnostics.mean_class_margin = metrics.mean_class_margin;

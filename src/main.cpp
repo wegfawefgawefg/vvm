@@ -797,7 +797,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         bool saw_new_best = false;
         if (loss.accuracy_samples > 0U) {
             std::cout << " test_nonclass_loss=" << loss.test_nonclass_loss
-                      << " test_class_loss=" << loss.test_class_loss;
+                      << " test_class_loss=" << loss.test_class_loss
+                      << " test_class_ce=" << loss.test_class_cross_entropy;
             if (loss.test_accuracy > best_accuracy) {
                 best_accuracy = loss.test_accuracy;
                 best_accuracy_epoch = epoch;

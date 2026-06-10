@@ -79,6 +79,7 @@ struct EvalMetrics {
     float loss = 0.0F;
     float nonclass_loss = 0.0F;
     float class_loss = 0.0F;
+    float class_cross_entropy = 0.0F;
     float accuracy = 0.0F;
     float balanced_accuracy = 0.0F;
     float mean_class_margin = 0.0F;
@@ -94,6 +95,7 @@ struct LossPoint {
     float test_loss = 0.0F;
     float test_nonclass_loss = 0.0F;
     float test_class_loss = 0.0F;
+    float test_class_cross_entropy = 0.0F;
     float test_accuracy = 0.0F;
     float test_balanced_accuracy = 0.0F;
     float mean_class_margin = 0.0F;
