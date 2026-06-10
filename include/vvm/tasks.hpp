@@ -61,6 +61,7 @@ struct TaskConfig {
     float rejection_threshold = 0.02F;
     float rejection_decay = 1.0F;
     float rejection_overuse_scale = 0.0F;
+    float op_anchor_scale = 0.0F;
     float class_value_scale = 2.0F;
     float class_loss_weight = 0.0F;
     bool backprop_through_state = false;
@@ -126,7 +127,8 @@ struct LossPoint {
                                        const TaskConfig& task_config);
 [[nodiscard]] LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_samples,
                                          std::span<const TaskSample> test_samples,
-                                         const TaskConfig& task_config, std::size_t epoch);
+                                         const TaskConfig& task_config, std::size_t epoch,
+                                         std::span<const float> op_anchor = {});
 [[nodiscard]] std::vector<float> neutral_state(std::size_t state_dim);
 
 } // namespace vvm

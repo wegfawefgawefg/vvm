@@ -102,6 +102,8 @@ struct TrainConfig {
     float rejection_threshold = 0.02F;
     float rejection_overuse_scale = 0.0F;
     std::span<const std::size_t> op_usage_counts = {};
+    std::span<const float> op_anchor = {};
+    float op_anchor_scale = 0.0F;
     bool average_repeated_ops = false;
     bool backprop_through_state = false;
 };

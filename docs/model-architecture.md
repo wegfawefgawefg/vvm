@@ -253,6 +253,21 @@ end of a run, which is useful evidence that the VM can reach a better state even
 when later updates drift. It is a training harness guard, not a continuous
 online stability rule.
 
+Sparse op anchoring is a new diagnostic for that drift:
+
+```text
+--op-anchor-scale F
+--anchor-to-best
+```
+
+The anchor term is applied only to ops selected in the current training window.
+It is not a dense decay across the whole bank. Without `--anchor-to-best`, the
+reference is the initial bank. With `--anchor-to-best`, the reference is the best
+evaluated bank found so far. Early probes show that initial anchoring restricts
+learning, while best-bank anchoring can hold a learned route plateau longer.
+That makes it useful for distinguishing "needs more movement" from "learns and
+then overwrites the active route."
+
 The gradient path now has a finite-difference direction test for weighted
 targets, including op-row renormalization. That test passed, so the current
 MNIST bottleneck is less likely to be a simple weighted-loss sign or denominator

@@ -938,7 +938,7 @@ float evaluate_task_loss(Model& model, std::span<const TaskSample> samples,
 
 LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_samples,
                            std::span<const TaskSample> test_samples, const TaskConfig& task_config,
-                           std::size_t epoch) {
+                           std::size_t epoch, std::span<const float> op_anchor) {
     if (train_samples.empty()) {
         const EvalMetrics metrics = evaluate_task_metrics(model, test_samples, task_config);
         LossPoint loss{};
@@ -966,6 +966,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                                    std::pow(task_config.rejection_decay, static_cast<float>(epoch));
     train_config.rejection_threshold = task_config.rejection_threshold;
     train_config.rejection_overuse_scale = task_config.rejection_overuse_scale;
+    train_config.op_anchor = op_anchor;
+    train_config.op_anchor_scale = task_config.op_anchor_scale;
     train_config.backprop_through_state = task_config.backprop_through_state;
 
     std::mt19937 rng(task_config.seed ^ static_cast<std::uint32_t>(epoch * 0x9E3779B9U));

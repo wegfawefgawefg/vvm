@@ -280,6 +280,26 @@ improves stability: it peaked at `85.7%` and ended around `85.4%`. `--restore-be
 restores that best epoch after training, but it should be treated as an
 experiment harness feature rather than a final continuous-learning solution.
 
+Sparse op anchoring is now available for stability probes:
+
+```text
+--op-anchor-scale F
+--anchor-to-best
+```
+
+The anchor is not a dense global decay. It only adds a pullback gradient to ops
+selected in the current recurrent window, preserving sparse VM-style updates.
+Without `--anchor-to-best`, the reference is the initial random op bank. With
+`--anchor-to-best`, the reference becomes the best evaluated bank found so far.
+
+On the 1024/512 `mnist-01` 32-register run, initial anchoring at `0.1` hurt
+learning and capped balanced accuracy around `83.6%`. Best-bank anchoring at
+`0.1` kept the same `85.7%` peak but held that result through later epochs
+instead of drifting down to `85.4%`. That suggests the current failure is not
+just insufficient bank movement. Useful routes form, then tiny continued
+updates can move the active route boundary; anchoring to the best learned bank
+is a practical stability diagnostic, not yet a solution to the accuracy ceiling.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

@@ -528,6 +528,56 @@ void test_rejection_lowers_bad_op_affinity() {
     assert(after_affinity < before_affinity);
 }
 
+void test_op_anchor_pulls_selected_op_toward_anchor() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.state_heat_stddev = 0.0F;
+    config.op_heat_stddev = 0.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    vvm::Tick tick = model.tick(state, rng, 0);
+    tick.observed_state = tick.predicted_state;
+    tick.prediction_error = 0.0F;
+
+    const std::vector<float> before(model.op_bank().begin(), model.op_bank().end());
+    std::vector<float> anchor = before;
+    const std::size_t op_offset = tick.chosen_op * config.state_dim;
+    anchor[op_offset] += 0.4F;
+    anchor[op_offset + 1U] -= 0.2F;
+    const std::span<float> anchor_op(anchor.data() + op_offset, config.state_dim);
+    const float anchor_norm = vvm::l2_norm(anchor_op);
+    for (float& value : anchor_op) {
+        value /= anchor_norm;
+    }
+
+    auto selected_anchor_distance = [&](std::span<const float> bank) {
+        float norm_sq = 0.0F;
+        for (std::size_t i = 0; i < config.state_dim; ++i) {
+            const float delta = bank[op_offset + i] - anchor[op_offset + i];
+            norm_sq += delta * delta;
+        }
+        return std::sqrt(norm_sq);
+    };
+
+    const float before_distance = selected_anchor_distance(before);
+
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 0.2F;
+    train_config.max_grad_norm = 0.0F;
+    train_config.op_anchor = anchor;
+    train_config.op_anchor_scale = 1.0F;
+    const vvm::TrainResult result =
+        model.train_window(std::span<const vvm::Tick>(&tick, 1), train_config);
+
+    const float after_distance = selected_anchor_distance(model.op_bank());
+    assert(result.updated_ops == 1U);
+    assert(after_distance < before_distance);
+}
+
 void test_observation_creates_curiosity_without_heat() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -624,6 +674,7 @@ int main() {
     test_train_window_momentum_runs();
     test_weighted_gradient_matches_finite_difference_direction();
     test_rejection_lowers_bad_op_affinity();
+    test_op_anchor_pulls_selected_op_toward_anchor();
     test_observation_creates_curiosity_without_heat();
     test_task_training_runs(vvm::TaskKind::CopyInput, 0U);
     test_task_training_runs(vvm::TaskKind::DelayedCopy, 4U);

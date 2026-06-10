@@ -495,9 +495,15 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     if (train_config.rejection_overuse_scale < 0.0F) {
         throw std::invalid_argument("rejection_overuse_scale must be nonnegative");
     }
+    if (train_config.op_anchor_scale < 0.0F) {
+        throw std::invalid_argument("op_anchor_scale must be nonnegative");
+    }
     if (!train_config.op_usage_counts.empty() &&
         train_config.op_usage_counts.size() != config_.num_ops) {
         throw std::invalid_argument("op_usage_counts size must match num_ops");
+    }
+    if (!train_config.op_anchor.empty() && train_config.op_anchor.size() != op_bank_.size()) {
+        throw std::invalid_argument("op_anchor size must match op bank size");
     }
     if (ticks.empty()) {
         return TrainResult{};
@@ -677,6 +683,16 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         for (std::size_t i = 0; i < config_.state_dim; ++i) {
             gradients[op_offset + i] *= scale;
             grad_norm_sq += gradients[op_offset + i] * gradients[op_offset + i];
+        }
+
+        if (train_config.op_anchor_scale > 0.0F && !train_config.op_anchor.empty()) {
+            grad_norm_sq = 0.0F;
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                const std::size_t offset = op_offset + i;
+                gradients[offset] += train_config.op_anchor_scale *
+                                     (op_bank_[offset] - train_config.op_anchor[offset]);
+                grad_norm_sq += gradients[offset] * gradients[offset];
+            }
         }
 
         const float grad_norm = std::sqrt(grad_norm_sq);

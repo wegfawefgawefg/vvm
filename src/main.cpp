@@ -34,6 +34,7 @@ struct CliOptions {
     float readout_learning_rate = 0.1F;
     ReadoutSource readout_source = ReadoutSource::Input;
     bool restore_best = false;
+    bool anchor_to_best = false;
 };
 
 void print_usage() {
@@ -51,7 +52,8 @@ void print_usage() {
                  "[--class-start-frame N] [--class-registers N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
-                 "[--rejection-overuse-scale F] [--bptt] [--restore-best]\n"
+                 "[--rejection-overuse-scale F] [--op-anchor-scale F] "
+                 "[--anchor-to-best] [--bptt] [--restore-best]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
@@ -210,6 +212,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             cli_options.restore_best = true;
             continue;
         }
+        if (arg == "--anchor-to-best") {
+            cli_options.anchor_to_best = true;
+            continue;
+        }
         if (i + 1 >= args.size()) {
             std::cerr << "missing value for " << arg << '\n';
             return false;
@@ -360,6 +366,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--rejection-overuse-scale") {
             if (!parse_float(value, task_config.rejection_overuse_scale)) {
+                return false;
+            }
+        } else if (arg == "--op-anchor-scale") {
+            if (!parse_float(value, task_config.op_anchor_scale)) {
                 return false;
             }
         } else if (arg == "--class-value-scale") {
@@ -656,6 +666,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " rejection_threshold=" << task_config.rejection_threshold
               << " rejection_decay=" << task_config.rejection_decay
               << " rejection_overuse_scale=" << task_config.rejection_overuse_scale
+              << " op_anchor_scale=" << task_config.op_anchor_scale
+              << " anchor_to_best=" << (cli_options.anchor_to_best ? 1 : 0)
               << " class_value_scale=" << task_config.class_value_scale
               << " class_loss_weight=" << task_config.class_loss_weight
               << " restore_best=" << (cli_options.restore_best ? 1 : 0)
@@ -671,8 +683,16 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
     std::vector<float> best_bank;
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
         const std::vector<float> epoch_bank_before(model.op_bank().begin(), model.op_bank().end());
-        const vvm::LossPoint loss =
-            vvm::train_task_epoch(model, dataset.train, dataset.test, task_config, epoch);
+        std::span<const float> op_anchor = {};
+        if (task_config.op_anchor_scale > 0.0F) {
+            if (cli_options.anchor_to_best && !best_bank.empty()) {
+                op_anchor = best_bank;
+            } else if (!cli_options.anchor_to_best) {
+                op_anchor = initial_bank;
+            }
+        }
+        const vvm::LossPoint loss = vvm::train_task_epoch(model, dataset.train, dataset.test,
+                                                          task_config, epoch, op_anchor);
         const float effective_lr =
             task_config.learning_rate *
             std::pow(task_config.learning_rate_decay, static_cast<float>(epoch));
@@ -713,7 +733,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
             best_loss_epoch = epoch;
             saw_new_best = true;
         }
-        if (cli_options.restore_best && saw_new_best) {
+        if ((cli_options.restore_best || cli_options.anchor_to_best) && saw_new_best) {
             best_bank.assign(model.op_bank().begin(), model.op_bank().end());
         }
         std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
