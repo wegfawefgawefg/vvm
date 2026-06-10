@@ -184,10 +184,6 @@ Tuning notes:
 - `--affinity-retain-underuse-scale` gates that positive route pressure by how
   under-selected the op is relative to average epoch usage. This avoids making
   already-dominant routes stickier.
-- `--usage-repel-scale` adds sparse overuse pressure independent of prediction
-  error. If a selected op is over average epoch usage, it is nudged away from the
-  working state. This is a diagnostic for whether broader op usage helps or
-  fights specialization.
 - `--retrieval-temperature 0` uses the default linear top-k sampling weights;
   positive values use score softmax over the top-k set.
 - `--sample-candidates N` caps stochastic training retrieval to the first `N`
@@ -356,11 +352,11 @@ fewer ops and did not beat sampling across all 16 candidates. The stochastic tai
 appears to help keep the op bank broad enough, even though it increases
 train/eval mismatch.
 
-Uniformity pressure is not automatically good. `--usage-repel-scale 0.001`
-increased route entropy and reduced the most-used op from about `1000` selections
-to the `300-400` range, but balanced accuracy collapsed to about `76%` with a
-strong class-1 bias. The useful route structure is not just a failure to spread
-across ops; some repeated routes are carrying needed class evidence.
+Uniformity pressure is not automatically good. A pure overuse-repulsion
+diagnostic increased route entropy and reduced the most-used op from about
+`1000` selections to the `300-400` range, but balanced accuracy collapsed to
+about `76%` with a strong class-1 bias. The diagnostic was removed; some
+repeated high-traffic routes appear to carry needed class evidence.
 
 Current deterministic-eval MNIST-01 probes show an important drift pattern:
 useful class behavior appears early, then continued training can reduce

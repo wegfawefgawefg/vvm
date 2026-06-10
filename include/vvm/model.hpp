@@ -104,7 +104,6 @@ struct TrainConfig {
     float rejection_scale = 0.0F;
     float rejection_threshold = 0.02F;
     float rejection_overuse_scale = 0.0F;
-    float usage_repel_scale = 0.0F;
     float affinity_retain_scale = 0.0F;
     float affinity_retain_threshold = 0.0F;
     float affinity_retain_underuse_scale = 0.0F;
@@ -153,7 +152,6 @@ class Model {
     [[nodiscard]] std::vector<float> seeded_state(float scale = 1.0F) const;
     [[nodiscard]] std::vector<float> predict_next(std::span<const float> state,
                                                   std::span<const float> input = {}) const;
-
     [[nodiscard]] static float prediction_error(std::span<const float> predicted,
                                                 std::span<const float> observed);
     [[nodiscard]] static float prediction_error(std::span<const float> predicted,

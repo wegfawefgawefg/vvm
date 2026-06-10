@@ -358,16 +358,11 @@ but collapsed route diversity to roughly `120/256` selected ops and peaked near
 default all-16 sampler. This suggests the stochastic tail is not just noise; it
 helps keep routes broad enough for the current setup.
 
-Pure overuse repulsion can be tested with:
-
-```text
---usage-repel-scale F
-```
-
-`--usage-repel-scale 0.001` made usage much more uniform, reducing the top op
-from roughly `1000` selections to `300-400`, but balanced accuracy collapsed to
-about `76%` and biased toward digit 1. So route concentration is not merely bad;
-the model currently needs some repeated high-traffic routes for class evidence.
+A pure overuse-repulsion diagnostic made usage much more uniform, reducing the
+top op from roughly `1000` selections to `300-400`, but balanced accuracy
+collapsed to about `76%` and biased toward digit 1. That path was removed. Route
+concentration is not merely bad; the model currently needs some repeated
+high-traffic routes for class evidence.
 
 ### 8. CartPole Observation Prediction
 
