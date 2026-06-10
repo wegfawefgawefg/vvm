@@ -30,6 +30,35 @@ struct Retrieval {
     float max_score = 0.0F;
 };
 
+struct RewardSignal {
+    float curiosity_reward = 0.0F;
+    float external_reward = 0.0F;
+    bool has_external_reward = false;
+    float total_reward = 0.0F;
+};
+
+struct Tick {
+    std::vector<float> state_before;
+    std::vector<float> working_state;
+    std::vector<std::size_t> candidate_indices;
+    std::vector<float> candidate_probs;
+    std::size_t chosen_op = 0;
+    float chosen_prob = 0.0F;
+    float chosen_score = 0.0F;
+    float max_score = 0.0F;
+
+    std::vector<float> pre_relu;
+    std::vector<float> post_relu;
+    std::vector<float> predicted_state;
+    std::vector<float> observed_state;
+
+    float activation_mean = 0.0F;
+    float prediction_error = 0.0F;
+    RewardSignal reward;
+    float state_heat_stddev = 0.0F;
+    float op_heat_stddev = 0.0F;
+};
+
 struct StepTrace {
     Retrieval retrieval;
     float state_norm = 0.0F;
@@ -45,6 +74,20 @@ struct RunResult {
     std::vector<StepTrace> trace;
 };
 
+struct TrainConfig {
+    float learning_rate = 0.01F;
+    float recency_decay = 0.97F;
+    float max_grad_norm = 1.0F;
+    bool average_repeated_ops = true;
+};
+
+struct TrainResult {
+    float loss = 0.0F;
+    float mean_prediction_error = 0.0F;
+    std::size_t tick_count = 0;
+    std::size_t updated_ops = 0;
+};
+
 class Model {
   public:
     explicit Model(Config config);
@@ -58,6 +101,10 @@ class Model {
     }
 
     [[nodiscard]] RunResult run(std::span<const float> initial_state);
+    [[nodiscard]] Tick tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock,
+                            std::span<const float> input = {},
+                            RewardSignal reward = RewardSignal{});
+    [[nodiscard]] TrainResult train_window(std::span<const Tick> ticks, TrainConfig train_config);
     [[nodiscard]] std::vector<float> seeded_state(float scale = 1.0F) const;
     [[nodiscard]] std::vector<float> predict_next(std::span<const float> state,
                                                   std::span<const float> input = {}) const;
@@ -68,6 +115,8 @@ class Model {
   private:
     struct Prediction {
         std::vector<float> state;
+        std::vector<float> pre_relu;
+        std::vector<float> post_relu;
         Retrieval retrieval;
         float activation_mean = 0.0F;
     };
@@ -76,9 +125,8 @@ class Model {
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state) const;
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state,
                                                         std::mt19937& rng) const;
-    [[nodiscard]] StepTrace step(std::vector<float>& state, std::mt19937& rng, std::size_t clock,
-                                 std::span<const float> input = {});
     void heat_op_bank(float stddev, std::mt19937& rng);
+    void normalize_op(std::size_t op);
 
     Config config_;
     std::vector<float> op_bank_;
