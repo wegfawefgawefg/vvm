@@ -93,16 +93,20 @@ actual op-bank delta L2 for the epoch, total drift from initialization, selected
 op count, max op reuse, normalized op-selection entropy, and per-op pressure.
 Pressure is tracked as selection count, heat delta L2 sum, and training delta L2
 sum for each op; the CLI prints the highest single op plus top-three
-`top_select`, `top_train`, and `top_heat` summaries each epoch. For class tasks
-it also prints label and prediction counts, `balanced_accuracy`,
-`class_margin`, `test_nonclass_loss`, and `test_class_loss`. `--hard-retrieval`
-uses the nearest op deterministically instead of sampling among top candidates.
+`top_select`, `top_train`, and `top_heat` summaries each epoch. It also reports
+retrieval sampling diagnostics: `mean_rank`, `mean_prob`, and
+`candidate_entropy`. For class tasks it prints label and prediction counts,
+`balanced_accuracy`, `class_margin`, `test_nonclass_loss`, and
+`test_class_loss`. `--hard-retrieval` uses the nearest op deterministically
+instead of sampling among top candidates.
 `--class-start-frame`, `--class-value-scale`, `--class-loss-weight`,
-`--lr-decay`, `--momentum`, and `--rejection-decay` are tuning knobs for register
-targets and anti-collapse pressure. `--class-start-frame` delays class-register
-loss while still training reconstruction from frame 0. `--rejection-overuse-scale`
-makes rejection focus on ops that are over-selected relative to the current
-epoch's usage distribution.
+`--retrieval-temperature`, `--lr-decay`, `--momentum`, and `--rejection-decay`
+are tuning knobs for register targets, candidate sampling, and anti-collapse
+pressure. `--class-start-frame` delays class-register loss while still training
+reconstruction from frame 0. `--retrieval-temperature 0` keeps the default
+linear top-k weighting; positive values use softmax over top-k scores.
+`--rejection-overuse-scale` makes rejection focus on ops that are over-selected
+relative to the current epoch's usage distribution.
 
 ## Layout
 

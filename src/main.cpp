@@ -40,7 +40,8 @@ void print_usage() {
               << "  vvm smoke\n"
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--activation deadzone] [--update-scale F] "
-                 "[--state-heat F] [--op-heat F] [--heat-decay F] [--hard-retrieval]\n"
+                 "[--retrieval-temperature F] [--state-heat F] [--op-heat F] "
+                 "[--heat-decay F] [--hard-retrieval]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
                  "sine-next|mnist-01|mnist] "
@@ -253,6 +254,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--activation-leak") {
             if (!parse_float(value, config.activation_leak)) {
+                return false;
+            }
+        } else if (arg == "--retrieval-temperature") {
+            if (!parse_float(value, config.retrieval_temperature)) {
                 return false;
             }
         } else if (arg == "--state-heat") {
@@ -621,6 +626,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " train_samples=" << dataset.train.size()
               << " test_samples=" << dataset.test.size()
               << " activation=" << activation_name(config.activation)
+              << " retrieval_temperature=" << config.retrieval_temperature
               << " vectors=" << vector_range_name(task_config.vector_range)
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
@@ -686,7 +692,10 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                   << " max_op_train=" << loss.max_op_train_index << ":" << loss.max_op_train_l2
                   << " selected_ops=" << loss.selected_ops << "/" << config.num_ops
                   << " max_op_select=" << loss.max_op_selections
-                  << " op_entropy=" << loss.op_selection_entropy;
+                  << " op_entropy=" << loss.op_selection_entropy
+                  << " mean_rank=" << loss.mean_chosen_rank
+                  << " mean_prob=" << loss.mean_chosen_prob
+                  << " candidate_entropy=" << loss.mean_candidate_entropy;
         print_top_counts("top_select", loss.op_selection_counts);
         print_top_floats("top_train", loss.op_train_l2_by_op);
         print_top_floats("top_heat", loss.op_heat_l2_by_op);

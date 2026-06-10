@@ -25,6 +25,7 @@ struct Config {
     float input_scale = 1.0F;
     float activation_threshold = 0.05F;
     float activation_leak = 0.01F;
+    float retrieval_temperature = 0.0F;
     float state_heat_stddev = 0.0F;
     float op_heat_stddev = 0.0F;
     float heat_decay = 1.0F;

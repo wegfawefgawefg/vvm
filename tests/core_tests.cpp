@@ -51,6 +51,43 @@ void test_run_shape() {
     }
 }
 
+void test_retrieval_temperature_sharpens_candidate_weights() {
+    auto candidate_entropy = [](const vvm::Tick& tick) {
+        float entropy = 0.0F;
+        float probability_sum = 0.0F;
+        for (const float probability : tick.candidate_probs) {
+            probability_sum += probability;
+            if (probability > 0.0F) {
+                entropy -= probability * std::log(probability);
+            }
+        }
+        assert(std::fabs(probability_sum - 1.0F) < 1.0e-5F);
+        return entropy;
+    };
+
+    vvm::Config linear_config{};
+    linear_config.state_dim = 16;
+    linear_config.num_ops = 32;
+    linear_config.candidate_count = 8;
+    linear_config.sample_retrieval = false;
+
+    vvm::Config softmax_config = linear_config;
+    softmax_config.retrieval_temperature = 0.02F;
+
+    vvm::Model linear_model(linear_config);
+    vvm::Model softmax_model(softmax_config);
+    std::vector<float> linear_state = linear_model.seeded_state();
+    std::vector<float> softmax_state = softmax_model.seeded_state();
+    std::mt19937 linear_rng(linear_config.seed);
+    std::mt19937 softmax_rng(softmax_config.seed);
+
+    const vvm::Tick linear_tick = linear_model.tick(linear_state, linear_rng, 0);
+    const vvm::Tick softmax_tick = softmax_model.tick(softmax_state, softmax_rng, 0);
+
+    assert(linear_tick.candidate_indices == softmax_tick.candidate_indices);
+    assert(candidate_entropy(softmax_tick) < candidate_entropy(linear_tick));
+}
+
 void test_prediction_error() {
     const float predicted[] = {1.0F, 0.0F};
     const float observed[] = {0.0F, 1.0F};
@@ -575,6 +612,7 @@ void test_invalid_config() {
 int main() {
     test_dot_product();
     test_run_shape();
+    test_retrieval_temperature_sharpens_candidate_weights();
     test_prediction_error();
     test_activation_modes_tick();
     test_heat_creates_curiosity();

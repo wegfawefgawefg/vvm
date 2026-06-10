@@ -252,6 +252,16 @@ lower digit-1 recall. Weighting digit 1 more strongly overcorrected toward
 predicting digit 1 and lowered balanced accuracy to about `75-76%`, so class
 imbalance is a symptom rather than the main fix.
 
+Retrieval-policy sweep: hard top-1 collapses to a tiny active set and stays near
+random. Softmax top-k sampling with tested temperatures `0.02`, `0.05`, and
+`0.1` also fails. The default linear top-k weighting works best so far because
+it samples a small candidate cloud (`mean_rank` around `1.6`, `mean_prob` around
+`0.42`) without spreading credit across too many ops.
+
+Larger-data sweep: the same 256-op setup with 2048 train samples peaked around
+`77.5%` balanced accuracy and then drifted toward class bias. More samples alone
+do not fix the current route stability problem.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

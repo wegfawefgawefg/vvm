@@ -162,6 +162,8 @@ Tuning notes:
   target normalization.
 - `--class-start-frame` delays class-register loss within each shown sample
   while keeping reconstruction/world-model pressure active.
+- `--retrieval-temperature 0` uses the default linear top-k sampling weights;
+  positive values use score softmax over the top-k set.
 - `--lr-decay` reduces learning rate by epoch.
 - `--momentum` enables optimizer momentum over op-bank updates.
 - `--rejection-decay` reduces rejection pressure by epoch.
@@ -201,6 +203,20 @@ Extra class-1 weighting was tested after the 80.5% run because the model
 underpredicted digit 1. It overcorrected toward class 1 and dropped balanced
 accuracy to about `75-76%`, so the current bottleneck is not simple class prior
 weighting.
+
+Retrieval diagnostics now report the chosen candidate's mean rank, mean sampling
+probability, and candidate-set entropy. The good 256-op run samples a small
+cloud rather than always selecting the nearest op: mean rank is about `1.6`,
+mean probability about `0.42`, and candidate entropy about `1.48`. Hard top-1
+collapses to roughly 16 selected ops and stays near random. Score-softmax
+sampling with temperatures `0.02`, `0.05`, and `0.1` also underperforms; it
+either sharpens too much or changes the route distribution enough to lose the
+80% jump. The current linear top-k weighting is therefore still the best
+retrieval policy tested for this pure base VM.
+
+Scaling the same setup to 2048 training samples did not fix convergence. It
+peaked lower, around `77.5%` balanced accuracy, and then drifted toward a class
+bias. That points at route/update stability rather than simple data starvation.
 
 The gradient path now has a finite-difference direction test for weighted
 targets, including op-row renormalization. That test passed, so the current

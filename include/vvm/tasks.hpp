@@ -93,6 +93,9 @@ struct LossPoint {
     float learning_update_l2 = 0.0F;
     float op_selection_entropy = 0.0F;
     float class_route_purity = 0.0F;
+    float mean_chosen_rank = 0.0F;
+    float mean_chosen_prob = 0.0F;
+    float mean_candidate_entropy = 0.0F;
     std::size_t accuracy_samples = 0;
     std::size_t updated_ops = 0;
     std::size_t selected_ops = 0;

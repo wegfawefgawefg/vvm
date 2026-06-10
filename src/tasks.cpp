@@ -561,6 +561,18 @@ void record_tick_diagnostics(const Tick& tick, const TaskSample& sample, std::si
         ++loss.op_selection_counts[tick.chosen_op];
         ++loss.total_selections;
     }
+    for (std::size_t rank = 0; rank < tick.candidate_indices.size(); ++rank) {
+        if (tick.candidate_indices[rank] == tick.chosen_op) {
+            loss.mean_chosen_rank += static_cast<float>(rank);
+            break;
+        }
+    }
+    loss.mean_chosen_prob += tick.chosen_prob;
+    for (const float probability : tick.candidate_probs) {
+        if (probability > 0.0F) {
+            loss.mean_candidate_entropy -= probability * std::log(probability);
+        }
+    }
     if (sample.label >= 0 && sample.class_count > 0 && tick.chosen_op < num_ops) {
         const std::size_t label = static_cast<std::size_t>(sample.label);
         const std::size_t offset = label * num_ops;
@@ -627,6 +639,12 @@ void finalize_op_usage(LossPoint& loss) {
     loss.selected_ops = selected_ops;
     loss.max_op_selections = max_op_selections;
     loss.op_selection_entropy = entropy;
+    if (loss.total_selections > 0U) {
+        const float inv_total = 1.0F / static_cast<float>(loss.total_selections);
+        loss.mean_chosen_rank *= inv_total;
+        loss.mean_chosen_prob *= inv_total;
+        loss.mean_candidate_entropy *= inv_total;
+    }
 
     for (std::size_t op = 0; op < loss.op_heat_l2_by_op.size(); ++op) {
         if (loss.op_heat_l2_by_op[op] > loss.max_op_heat_l2) {

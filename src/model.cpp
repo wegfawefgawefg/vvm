@@ -159,6 +159,9 @@ Model::Model(Config config) : config_(config) {
     if (config_.activation_leak < 0.0F) {
         throw std::invalid_argument("activation_leak must be nonnegative");
     }
+    if (config_.retrieval_temperature < 0.0F) {
+        throw std::invalid_argument("retrieval_temperature must be nonnegative");
+    }
     if (config_.state_heat_stddev < 0.0F) {
         throw std::invalid_argument("state_heat_stddev must be nonnegative");
     }
@@ -317,15 +320,28 @@ Retrieval Model::retrieve(std::span<const float> state) const {
     retrieval.max_score = scores.front().first;
     const float min_candidate_score = scores[config_.candidate_count - 1U].first;
 
-    float weight_sum = 0.0F;
-    for (std::size_t i = 0; i < config_.candidate_count; ++i) {
-        retrieval.candidate_indices[i] = scores[i].second;
-        retrieval.candidate_weights[i] =
-            std::max(scores[i].first - min_candidate_score + 1.0e-6F, 1.0e-6F);
-        weight_sum += retrieval.candidate_weights[i];
-    }
-    for (float& weight : retrieval.candidate_weights) {
-        weight /= weight_sum;
+    if (config_.retrieval_temperature > 0.0F) {
+        float weight_sum = 0.0F;
+        for (std::size_t i = 0; i < config_.candidate_count; ++i) {
+            retrieval.candidate_indices[i] = scores[i].second;
+            retrieval.candidate_weights[i] =
+                std::exp((scores[i].first - retrieval.max_score) / config_.retrieval_temperature);
+            weight_sum += retrieval.candidate_weights[i];
+        }
+        for (float& weight : retrieval.candidate_weights) {
+            weight /= weight_sum;
+        }
+    } else {
+        float weight_sum = 0.0F;
+        for (std::size_t i = 0; i < config_.candidate_count; ++i) {
+            retrieval.candidate_indices[i] = scores[i].second;
+            retrieval.candidate_weights[i] =
+                std::max(scores[i].first - min_candidate_score + 1.0e-6F, 1.0e-6F);
+            weight_sum += retrieval.candidate_weights[i];
+        }
+        for (float& weight : retrieval.candidate_weights) {
+            weight /= weight_sum;
+        }
     }
     return retrieval;
 }
