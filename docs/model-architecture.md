@@ -112,13 +112,18 @@ state[784..793]  digit registers
 ```
 
 This is only a target layout, not a separate addressing/writing split. The image
-region does not own addressing, and the class registers do not own writing. The
-whole state still addresses the next op, the chosen op updates the whole state,
-and losses are measured wherever a task applies constraints. Reconstructing the
-image region is the world-model constraint. Setting class registers is an
-additional supervised constraint on the same signal path. Both losses push
-through the same state trajectory and selected op, with dimension weights and
-timing controlling how much each constraint contributes.
+region does not own addressing, and the class registers do not own writing. That
+split would be the wrong lesson: it would stop the system from learning from all
+constraints applied to the same signal.
+
+The whole state still addresses the next op, the chosen op updates the whole
+state, and losses are measured wherever a task applies constraints.
+Reconstructing the image region is the world-model constraint. Setting class
+registers is an additional supervised constraint on the same recurrent signal
+path. Both losses push through the same state trajectory and selected op, with
+dimension weights and timing controlling how much each constraint contributes.
+The current MNIST task keeps reconstruction active while adding class pressure;
+it is not an image-address/class-write machine.
 
 Current diagnostic ladder:
 

@@ -225,8 +225,10 @@ stayed near random accuracy. That version made the image query and digit target
 too dissimilar. The current probe preserves image state and adds digit-register
 constraints so the core gets both sample reconstruction/world-model pressure and
 class determination pressure from the same state trajectory. These are measured
-constraints on one recurrent signal path, not a split where the image addresses
-and the class registers write.
+constraints on one recurrent signal path. The phrase "image addresses,
+class-register writes" describes a bad decomposition to avoid, not the design.
+The desired behavior is that every active constraint can shape the selected ops
+and the resulting state movement.
 
 Latest no-socket result: `mnist-01` improves with weighted class-register loss,
 momentum, and delayed class supervision. The best current 256-op run starts
