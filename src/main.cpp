@@ -45,7 +45,8 @@ void print_usage() {
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
-                 "[--idle-frames N] [--window N] [--lr F]\n"
+                 "[--idle-frames N] [--window N] [--lr F] [--class-loss-weight F] "
+                 "[--class-value-scale F] [--rejection-decay F]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
@@ -312,6 +313,18 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_float(value, task_config.rejection_threshold)) {
                 return false;
             }
+        } else if (arg == "--rejection-decay") {
+            if (!parse_float(value, task_config.rejection_decay)) {
+                return false;
+            }
+        } else if (arg == "--class-value-scale") {
+            if (!parse_float(value, task_config.class_value_scale)) {
+                return false;
+            }
+        } else if (arg == "--class-loss-weight") {
+            if (!parse_float(value, task_config.class_loss_weight)) {
+                return false;
+            }
         } else {
             std::cerr << "unknown option: " << arg << '\n';
             return false;
@@ -453,6 +466,9 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " window=" << task_config.window_size << " lr=" << task_config.learning_rate
               << " rejection_scale=" << task_config.rejection_scale
               << " rejection_threshold=" << task_config.rejection_threshold
+              << " rejection_decay=" << task_config.rejection_decay
+              << " class_value_scale=" << task_config.class_value_scale
+              << " class_loss_weight=" << task_config.class_loss_weight
               << " params=" << model.parameter_count() << '\n';
 
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {

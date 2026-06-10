@@ -53,6 +53,9 @@ struct TaskConfig {
     float max_grad_norm = 1.0F;
     float rejection_scale = 0.0F;
     float rejection_threshold = 0.02F;
+    float rejection_decay = 1.0F;
+    float class_value_scale = 2.0F;
+    float class_loss_weight = 0.0F;
     VectorRange vector_range = VectorRange::Signed;
     std::string mnist_dir = "resources/mnist";
     std::uint32_t seed = 0x51A7E5U;

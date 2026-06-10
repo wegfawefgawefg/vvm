@@ -139,6 +139,19 @@ loss to class registers. Binary MNIST improves with more ops and weighted class
 registers; a 512-op, 1024-sample run reached about 76% on `mnist-01`, but it is
 not solved yet.
 
+Tuning notes:
+
+- `--class-loss-weight` increases the gradient pressure on class registers.
+- `--class-value-scale` changes the class register target amplitude before
+  target normalization.
+- `--rejection-decay` reduces rejection pressure by epoch.
+
+Quick sweeps show that raising `--class-loss-weight` from the default binary
+MNIST value to 512 does not solve the task by itself. Rejection is still needed
+to avoid op collapse, but persistent rejection can drag learned attractors. The
+next likely fix is making rejection conditional on local overuse or decaying it
+based on measured op entropy rather than blindly by epoch.
+
 Further probes:
 
 - keep homogeneous ops but add a small readout socket to ask whether class

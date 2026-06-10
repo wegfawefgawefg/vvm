@@ -229,6 +229,12 @@ but it is not converged. 10-class MNIST remains unsolved. Linear readout sockets
 still solve the same raw inputs easily, so the remaining problem is in the VVM
 core retrieval/update dynamics rather than the data loader.
 
+Additional sweep result: stronger class-register loss (`--class-loss-weight
+512`) and simple epoch-decayed rejection did not break past the low 70s on the
+256-op binary task. No rejection collapses usage and predicts almost all class
+0. This points toward smarter anti-collapse pressure rather than just stronger
+supervised register loss.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

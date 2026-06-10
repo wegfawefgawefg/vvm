@@ -43,6 +43,7 @@ cmake --build --preset dev-sdl3
 ./scripts/fetch_mnist.sh
 ./build/vvm train-task --task mnist-01 --state-dim 794 --ops 16 --candidates 8 --train-samples 512 --test-samples 256 --sample-frames 8 --window 8 --epochs 30 --lr 0.1 --rejection-scale 0.05
 ./build/vvm train-task --task mnist-01 --state-dim 786 --ops 512 --candidates 32 --train-samples 1024 --test-samples 512 --sample-frames 8 --window 8 --epochs 10 --lr 0.01 --max-grad-norm 0.1 --rejection-scale 0.02
+./build/vvm train-task --task mnist-01 --state-dim 786 --ops 256 --candidates 16 --train-samples 512 --test-samples 256 --sample-frames 8 --window 8 --epochs 12 --lr 0.01 --max-grad-norm 0.1 --rejection-scale 0.04 --rejection-decay 0.85 --class-loss-weight 512
 ./build/vvm train-task --task mnist --state-dim 794 --ops 2048 --candidates 8 --train-samples 512 --test-samples 128 --sample-frames 8 --window 8 --epochs 10 --lr 0.05
 ./build-sdl3/vvm visualize --steps 256
 ./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
@@ -84,7 +85,9 @@ delta L2 for the epoch, total drift from initialization, selected op count, max
 op reuse, normalized op-selection entropy, and the highest per-op heat/train
 pressure for the epoch. For class tasks it also prints label and prediction
 counts. `--hard-retrieval` uses the nearest op deterministically instead of
-sampling among top candidates.
+sampling among top candidates. `--class-value-scale`, `--class-loss-weight`,
+and `--rejection-decay` are tuning knobs for register targets and anti-collapse
+pressure.
 
 ## Layout
 

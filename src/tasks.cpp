@@ -163,8 +163,12 @@ std::ifstream open_binary(const std::filesystem::path& path) {
     return stream;
 }
 
+float class_loss_weight_or(float configured, float fallback) {
+    return configured > 0.0F ? configured : fallback;
+}
+
 TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigned char label,
-                             std::size_t state_dim, VectorRange range) {
+                             std::size_t state_dim, const TaskConfig& task_config) {
     constexpr std::size_t kImageDims = 784;
     constexpr std::size_t kDigitOffset = 784;
     constexpr std::size_t kDigitClasses = 10;
@@ -181,16 +185,17 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
     std::vector<float> target(state_dim, 0.0F);
     std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
     constexpr float kImageWeight = 1.0F;
-    constexpr float kClassWeight = 2.0F;
-    constexpr float kClassTargetWeight = 64.0F;
+    const float class_value_scale = task_config.class_value_scale;
+    const float class_target_weight = class_loss_weight_or(task_config.class_loss_weight, 64.0F);
     for (std::size_t i = 0; i < pixels.size(); ++i) {
         target[i] = kImageWeight * input[i];
     }
-    const std::vector<float> digit = class_vector(kDigitClasses, static_cast<int>(label),
-                                                  static_cast<int>(kDigitClasses), range);
+    const std::vector<float> digit =
+        class_vector(kDigitClasses, static_cast<int>(label), static_cast<int>(kDigitClasses),
+                     task_config.vector_range);
     for (std::size_t i = 0; i < digit.size(); ++i) {
-        target[kDigitOffset + i] = kClassWeight * digit[i];
-        target_weights[kDigitOffset + i] = kClassTargetWeight;
+        target[kDigitOffset + i] = class_value_scale * digit[i];
+        target_weights[kDigitOffset + i] = class_target_weight;
     }
     normalize_l2(target);
 
@@ -205,7 +210,7 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
 }
 
 TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, unsigned char label,
-                                    std::size_t state_dim, VectorRange range) {
+                                    std::size_t state_dim, const TaskConfig& task_config) {
     constexpr std::size_t kImageDims = 784;
     constexpr std::size_t kDigitOffset = 784;
     constexpr std::size_t kDigitClasses = 2;
@@ -225,16 +230,17 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
     std::vector<float> target(state_dim, 0.0F);
     std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
     constexpr float kImageWeight = 1.0F;
-    constexpr float kClassWeight = 2.0F;
-    constexpr float kClassTargetWeight = 128.0F;
+    const float class_value_scale = task_config.class_value_scale;
+    const float class_target_weight = class_loss_weight_or(task_config.class_loss_weight, 128.0F);
     for (std::size_t i = 0; i < pixels.size(); ++i) {
         target[i] = kImageWeight * input[i];
     }
-    const std::vector<float> digit = class_vector(kDigitClasses, static_cast<int>(label),
-                                                  static_cast<int>(kDigitClasses), range);
+    const std::vector<float> digit =
+        class_vector(kDigitClasses, static_cast<int>(label), static_cast<int>(kDigitClasses),
+                     task_config.vector_range);
     for (std::size_t i = 0; i < digit.size(); ++i) {
-        target[kDigitOffset + i] = kClassWeight * digit[i];
-        target_weights[kDigitOffset + i] = kClassTargetWeight;
+        target[kDigitOffset + i] = class_value_scale * digit[i];
+        target_weights[kDigitOffset + i] = class_target_weight;
     }
     normalize_l2(target);
 
@@ -250,7 +256,7 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
 
 void append_mnist_split(std::vector<TaskSample>& samples, const std::filesystem::path& images_path,
                         const std::filesystem::path& labels_path, std::size_t requested_count,
-                        std::size_t state_dim, VectorRange range) {
+                        std::size_t state_dim, const TaskConfig& task_config) {
     std::ifstream images = open_binary(images_path);
     std::ifstream labels = open_binary(labels_path);
 
@@ -283,7 +289,7 @@ void append_mnist_split(std::vector<TaskSample>& samples, const std::filesystem:
         if (label >= 10U) {
             throw std::runtime_error("invalid MNIST label in " + labels_path.string());
         }
-        samples.push_back(make_mnist_sample(pixels, label, state_dim, range));
+        samples.push_back(make_mnist_sample(pixels, label, state_dim, task_config));
     }
 }
 
@@ -291,7 +297,7 @@ void append_mnist_binary_split(std::vector<TaskSample>& samples,
                                const std::filesystem::path& images_path,
                                const std::filesystem::path& labels_path,
                                std::size_t requested_count, std::size_t state_dim,
-                               VectorRange range) {
+                               const TaskConfig& task_config) {
     std::ifstream images = open_binary(images_path);
     std::ifstream labels = open_binary(labels_path);
 
@@ -320,14 +326,15 @@ void append_mnist_binary_split(std::vector<TaskSample>& samples,
                                      images_path.parent_path().string());
         }
         if (label <= 1U) {
-            samples.push_back(make_mnist_binary_sample(pixels, label, state_dim, range));
+            samples.push_back(make_mnist_binary_sample(pixels, label, state_dim, task_config));
         }
     }
 }
 
 TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t index,
-                       std::size_t offset, VectorRange range, std::mt19937& rng) {
+                       std::size_t offset, const TaskConfig& task_config, std::mt19937& rng) {
     const std::size_t state_dim = model_config.state_dim;
+    const VectorRange range = task_config.vector_range;
     switch (task) {
     case TaskKind::CopyInput: {
         std::vector<float> input = range == VectorRange::Signed
@@ -367,11 +374,12 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         std::vector<float> target = input;
         std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
         const std::vector<float> class_target = class_vector(2, label ? 1 : 0, 2, range);
-        constexpr float kClassWeight = 2.0F;
-        constexpr float kClassTargetWeight = 16.0F;
+        const float class_value_scale = task_config.class_value_scale;
+        const float class_target_weight =
+            class_loss_weight_or(task_config.class_loss_weight, 16.0F);
         for (std::size_t i = 0; i < class_target.size(); ++i) {
-            target[class_offset + i] = kClassWeight * class_target[i];
-            target_weights[class_offset + i] = kClassTargetWeight;
+            target[class_offset + i] = class_value_scale * class_target[i];
+            target_weights[class_offset + i] = class_target_weight;
         }
         normalize_l2(target);
         return TaskSample{
@@ -447,10 +455,10 @@ TaskDataset make_mnist_dataset(const Config& model_config, const TaskConfig& tas
 
     append_mnist_split(dataset.train, root / "train-images-idx3-ubyte",
                        root / "train-labels-idx1-ubyte", task_config.train_samples,
-                       model_config.state_dim, task_config.vector_range);
+                       model_config.state_dim, task_config);
     append_mnist_split(dataset.test, root / "t10k-images-idx3-ubyte",
                        root / "t10k-labels-idx1-ubyte", task_config.test_samples,
-                       model_config.state_dim, task_config.vector_range);
+                       model_config.state_dim, task_config);
     return dataset;
 }
 
@@ -466,10 +474,10 @@ TaskDataset make_mnist_binary_dataset(const Config& model_config, const TaskConf
 
     append_mnist_binary_split(dataset.train, root / "train-images-idx3-ubyte",
                               root / "train-labels-idx1-ubyte", task_config.train_samples,
-                              model_config.state_dim, task_config.vector_range);
+                              model_config.state_dim, task_config);
     append_mnist_binary_split(dataset.test, root / "t10k-images-idx3-ubyte",
                               root / "t10k-labels-idx1-ubyte", task_config.test_samples,
-                              model_config.state_dim, task_config.vector_range);
+                              model_config.state_dim, task_config);
     return dataset;
 }
 
@@ -603,6 +611,15 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.window_size == 0U) {
         throw std::invalid_argument("window_size must be nonzero");
     }
+    if (task_config.rejection_decay < 0.0F || task_config.rejection_decay > 1.0F) {
+        throw std::invalid_argument("rejection_decay must be in [0, 1]");
+    }
+    if (task_config.class_value_scale < 0.0F) {
+        throw std::invalid_argument("class_value_scale must be nonnegative");
+    }
+    if (task_config.class_loss_weight < 0.0F) {
+        throw std::invalid_argument("class_loss_weight must be nonnegative");
+    }
     if (model_config.state_dim == 0U) {
         throw std::invalid_argument("state_dim must be nonzero");
     }
@@ -621,8 +638,8 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     auto append_samples = [&](std::vector<TaskSample>& samples, std::size_t count,
                               std::size_t offset) {
         for (std::size_t i = 0; i < count; ++i) {
-            samples.push_back(make_sample(task_config.task, model_config, i, offset,
-                                          task_config.vector_range, rng));
+            samples.push_back(
+                make_sample(task_config.task, model_config, i, offset, task_config, rng));
         }
     };
 
@@ -736,7 +753,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     train_config.learning_rate = task_config.learning_rate;
     train_config.recency_decay = task_config.recency_decay;
     train_config.max_grad_norm = task_config.max_grad_norm;
-    train_config.rejection_scale = task_config.rejection_scale;
+    train_config.rejection_scale = task_config.rejection_scale *
+                                   std::pow(task_config.rejection_decay, static_cast<float>(epoch));
     train_config.rejection_threshold = task_config.rejection_threshold;
 
     std::mt19937 rng(task_config.seed ^ static_cast<std::uint32_t>(epoch * 0x9E3779B9U));
