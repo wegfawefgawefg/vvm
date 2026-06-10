@@ -238,7 +238,6 @@ void Model::save_checkpoint(const std::string& path) const {
     const std::uint64_t sample_candidate_count =
         static_cast<std::uint64_t>(config_.sample_candidate_count);
     const std::uint64_t activation = static_cast<std::uint64_t>(config_.activation);
-    const std::uint64_t sample_retrieval = config_.sample_retrieval ? 1U : 0U;
     const std::uint32_t seed = config_.seed;
     const float scalars[] = {
         config_.update_scale,          config_.input_scale,
@@ -255,7 +254,9 @@ void Model::save_checkpoint(const std::string& path) const {
     out.write(reinterpret_cast<const char*>(&sample_candidate_count),
               sizeof(sample_candidate_count));
     out.write(reinterpret_cast<const char*>(&activation), sizeof(activation));
-    out.write(reinterpret_cast<const char*>(&sample_retrieval), sizeof(sample_retrieval));
+    const std::uint64_t stored_sample_retrieval = config_.sample_retrieval ? 1U : 0U;
+    out.write(reinterpret_cast<const char*>(&stored_sample_retrieval),
+              sizeof(stored_sample_retrieval));
     out.write(reinterpret_cast<const char*>(&seed), sizeof(seed));
     out.write(reinterpret_cast<const char*>(scalars), sizeof(scalars));
     out.write(reinterpret_cast<const char*>(op_bank_.data()),
@@ -277,7 +278,7 @@ void Model::load_checkpoint(const std::string& path) {
     std::uint64_t candidate_count = 0;
     std::uint64_t sample_candidate_count = 0;
     std::uint64_t activation = 0;
-    std::uint64_t sample_retrieval = 0;
+    std::uint64_t stored_sample_retrieval = 0;
     std::uint32_t seed = 0;
     float scalars[9] = {};
 
@@ -287,7 +288,7 @@ void Model::load_checkpoint(const std::string& path) {
     in.read(reinterpret_cast<char*>(&candidate_count), sizeof(candidate_count));
     in.read(reinterpret_cast<char*>(&sample_candidate_count), sizeof(sample_candidate_count));
     in.read(reinterpret_cast<char*>(&activation), sizeof(activation));
-    in.read(reinterpret_cast<char*>(&sample_retrieval), sizeof(sample_retrieval));
+    in.read(reinterpret_cast<char*>(&stored_sample_retrieval), sizeof(stored_sample_retrieval));
     in.read(reinterpret_cast<char*>(&seed), sizeof(seed));
     in.read(reinterpret_cast<char*>(scalars), sizeof(scalars));
     const char expected_magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '1'};
@@ -297,8 +298,7 @@ void Model::load_checkpoint(const std::string& path) {
     if (state_dim != config_.state_dim || num_ops != config_.num_ops ||
         candidate_count != config_.candidate_count ||
         sample_candidate_count != config_.sample_candidate_count ||
-        activation != static_cast<std::uint64_t>(config_.activation) ||
-        sample_retrieval != (config_.sample_retrieval ? 1U : 0U) || seed != config_.seed ||
+        activation != static_cast<std::uint64_t>(config_.activation) || seed != config_.seed ||
         scalars[0] != config_.update_scale || scalars[1] != config_.input_scale ||
         scalars[2] != config_.activation_threshold || scalars[3] != config_.activation_leak ||
         scalars[4] != config_.retrieval_temperature || scalars[5] != config_.state_heat_stddev ||

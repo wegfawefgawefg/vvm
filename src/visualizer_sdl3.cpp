@@ -232,8 +232,8 @@ void draw_state_image(SDL_Renderer* renderer, std::span<const float> values, flo
 
 void draw_probe(SDL_Renderer* renderer, const Model& model, const TaskDataset& dataset,
                 std::span<const float> state, std::size_t sample_index, bool input_enabled,
-                bool paused, std::size_t tick_count, std::size_t ticks_per_frame, int width,
-                int height) {
+                bool paused, std::size_t tick_count, std::size_t ticks_per_frame,
+                const Tick* last_tick, int width, int height) {
     SDL_SetRenderDrawColor(renderer, 14, 16, 20, 255);
     SDL_RenderClear(renderer);
 
@@ -246,7 +246,7 @@ void draw_probe(SDL_Renderer* renderer, const Model& model, const TaskDataset& d
     const float panel_scale = std::max(
         4.0F, std::min(static_cast<float>(width) / 145.0F, static_cast<float>(height) / 58.0F));
     const float image_size = 28.0F * panel_scale;
-    const float top = 96.0F;
+    const float top = 118.0F;
     const float gap = 28.0F;
     const float left = 28.0F;
 
@@ -268,28 +268,67 @@ void draw_probe(SDL_Renderer* renderer, const Model& model, const TaskDataset& d
     const float x2 = x1 + image_size + gap;
     const float x3 = x2 + image_size + gap;
 
-    draw_text(renderer, 18, "original", x0, top - 28.0F, SDL_Color{235, 240, 245, 255});
-    draw_text(renderer, 18, "input socket", x1, top - 28.0F, SDL_Color{235, 240, 245, 255});
-    draw_text(renderer, 18, "VVM state", x2, top - 28.0F, SDL_Color{235, 240, 245, 255});
-    draw_text(renderer, 18, "state-original", x3, top - 28.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 14, "original", x0, top - 22.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 14, "input socket", x1, top - 22.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 14, "VVM state", x2, top - 22.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 14, "state-original", x3, top - 22.0F, SDL_Color{235, 240, 245, 255});
 
     draw_state_image(renderer, sample.input, x0, top, panel_scale, original_white, false);
     draw_state_image(renderer, input_view, x1, top, panel_scale, original_white, false);
     draw_state_image(renderer, state, x2, top, panel_scale, state_white, true);
     draw_state_image(renderer, diff, x3, top, panel_scale, diff_white, true);
 
-    char overlay[1024];
+    std::size_t chosen_rank = 0;
+    bool found_rank = false;
+    char candidates[256] = "candidates=none";
+    if (last_tick != nullptr) {
+        char* cursor = candidates;
+        std::size_t remaining = sizeof(candidates);
+        const int written = std::snprintf(cursor, remaining, "candidates=");
+        if (written > 0 && static_cast<std::size_t>(written) < remaining) {
+            cursor += written;
+            remaining -= static_cast<std::size_t>(written);
+        }
+        const std::size_t shown = std::min<std::size_t>(last_tick->candidate_indices.size(), 8U);
+        for (std::size_t i = 0; i < shown && remaining > 1U; ++i) {
+            if (last_tick->candidate_indices[i] == last_tick->chosen_op) {
+                chosen_rank = i;
+                found_rank = true;
+            }
+            const int n = std::snprintf(cursor, remaining, "%s%zu", i == 0U ? "" : ",",
+                                        last_tick->candidate_indices[i]);
+            if (n <= 0 || static_cast<std::size_t>(n) >= remaining) {
+                break;
+            }
+            cursor += n;
+            remaining -= static_cast<std::size_t>(n);
+        }
+    }
+
+    char route[512];
+    if (last_tick != nullptr) {
+        std::snprintf(
+            route, sizeof(route), "op=%zu rank=%s%zu chosen_score=%.4f max_score=%.4f prob=%.4f",
+            last_tick->chosen_op, found_rank ? "" : "?", chosen_rank,
+            static_cast<double>(last_tick->chosen_score), static_cast<double>(last_tick->max_score),
+            static_cast<double>(last_tick->chosen_prob));
+    } else {
+        std::snprintf(route, sizeof(route), "op=none");
+    }
+
+    char overlay[1280];
     std::snprintf(
         overlay, sizeof(overlay),
-        "visualize-probe  sample=%zu/%zu label=%d  tick=%zu  mode=%s  input=%s  "
-        "ticks/frame=%zu\n"
-        "keys: space pause  n/p sample  i input  r reset  . step  +/- clock  0 jump zero  "
-        "1 jump one\n"
+        "sample=%zu/%zu  label=%d  tick=%zu  mode=%s  input=%s  ticks/frame=%zu\n"
+        "%s\n"
+        "%s\n"
+        "keys: space pause | . step | i input | n/p sample | 0/1 jump | r reset | +/- clock | "
+        "q quit\n"
         "params=%zu  ops=%zu  d=%zu  state_white=%.5f",
         sample_index, dataset.test.size(), sample.label, tick_count, paused ? "paused" : "running",
-        input_enabled ? "on" : "off", ticks_per_frame, model.parameter_count(),
+        input_enabled ? "on" : "off", ticks_per_frame, route, candidates, model.parameter_count(),
         model.config().num_ops, model.config().state_dim, static_cast<double>(state_white));
-    draw_text(renderer, 18, overlay, 20.0F, 18.0F, SDL_Color{235, 240, 245, 255});
+    draw_text(renderer, 14, overlay, 20.0F, 16.0F, SDL_Color{235, 240, 245, 255});
 }
 
 std::size_t find_next_label(std::span<const TaskSample> samples, std::size_t start, int label) {
@@ -469,6 +508,8 @@ int run_probe_visualizer(const Config& config, const TaskConfig& task_config, st
     bool paused = false;
     bool running = true;
     bool single_step = false;
+    Tick last_tick{};
+    bool has_last_tick = false;
 
     while (running) {
         SDL_Event event{};
@@ -486,21 +527,26 @@ int run_probe_visualizer(const Config& config, const TaskConfig& task_config, st
                 } else if (key == SDLK_R) {
                     state = neutral_state(config.state_dim);
                     tick_count = 0;
+                    has_last_tick = false;
                 } else if (key == SDLK_PERIOD) {
                     single_step = true;
                 } else if (key == SDLK_N && !dataset.test.empty()) {
                     sample_index = (sample_index + 1U) % dataset.test.size();
+                    has_last_tick = false;
                 } else if (key == SDLK_P && !dataset.test.empty()) {
                     sample_index =
                         sample_index == 0U ? dataset.test.size() - 1U : sample_index - 1U;
+                    has_last_tick = false;
                 } else if (key == SDLK_EQUALS || key == SDLK_PLUS) {
                     ticks_per_frame = std::min<std::size_t>(256U, ticks_per_frame + 1U);
                 } else if (key == SDLK_MINUS) {
                     ticks_per_frame = std::max<std::size_t>(1U, ticks_per_frame - 1U);
                 } else if (key == SDLK_0) {
                     sample_index = find_next_label(dataset.test, sample_index, 0);
+                    has_last_tick = false;
                 } else if (key == SDLK_1) {
                     sample_index = find_next_label(dataset.test, sample_index, 1);
+                    has_last_tick = false;
                 }
             }
         }
@@ -510,10 +556,11 @@ int run_probe_visualizer(const Config& config, const TaskConfig& task_config, st
             const std::size_t ticks = single_step ? 1U : ticks_per_frame;
             for (std::size_t i = 0; i < ticks; ++i) {
                 if (input_enabled) {
-                    static_cast<void>(model.tick(state, rng, tick_count, sample.input));
+                    last_tick = model.tick(state, rng, tick_count, sample.input);
                 } else {
-                    static_cast<void>(model.tick(state, rng, tick_count));
+                    last_tick = model.tick(state, rng, tick_count);
                 }
+                has_last_tick = true;
                 ++tick_count;
             }
             single_step = false;
@@ -523,7 +570,7 @@ int run_probe_visualizer(const Config& config, const TaskConfig& task_config, st
         int height = 0;
         SDL_GetWindowSizeInPixels(window, &width, &height);
         draw_probe(renderer, model, dataset, state, sample_index, input_enabled, paused, tick_count,
-                   ticks_per_frame, width, height);
+                   ticks_per_frame, has_last_tick ? &last_tick : nullptr, width, height);
         SDL_RenderPresent(renderer);
         SDL_Delay(16);
     }
