@@ -185,6 +185,24 @@ float Model::prediction_error(std::span<const float> predicted, std::span<const 
     return sum / static_cast<float>(predicted.size());
 }
 
+void apply_observation(Tick& tick, std::span<const float> observed, float curiosity_scale) {
+    if (tick.predicted_state.size() != observed.size()) {
+        throw std::invalid_argument(
+            "apply_observation requires observed size to match predicted state");
+    }
+    if (curiosity_scale < 0.0F) {
+        throw std::invalid_argument("curiosity_scale must be nonnegative");
+    }
+
+    tick.observed_state.assign(observed.begin(), observed.end());
+    tick.prediction_error = Model::prediction_error(tick.predicted_state, tick.observed_state);
+    tick.reward.curiosity_reward = curiosity_scale * tick.prediction_error;
+    tick.reward.total_reward = tick.reward.curiosity_reward;
+    if (tick.reward.has_external_reward) {
+        tick.reward.total_reward += tick.reward.external_reward;
+    }
+}
+
 Retrieval Model::retrieve(std::span<const float> state) const {
     if (state.size() != config_.state_dim) {
         throw std::invalid_argument("state size does not match model state_dim");
@@ -306,13 +324,6 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
     apply_heat(state, state_heat, rng);
     normalize_l2(state);
 
-    const float error = prediction_error(prediction.state, state);
-    reward.curiosity_reward = config_.curiosity_scale * error;
-    reward.total_reward = reward.curiosity_reward;
-    if (reward.has_external_reward) {
-        reward.total_reward += reward.external_reward;
-    }
-
     const float chosen_prob = [&prediction]() {
         for (std::size_t i = 0; i < prediction.retrieval.candidate_indices.size(); ++i) {
             if (prediction.retrieval.candidate_indices[i] == prediction.retrieval.chosen_index) {
@@ -322,7 +333,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         return 0.0F;
     }();
 
-    return Tick{
+    Tick tick_result{
         .state_before = std::move(state_before),
         .working_state = std::move(working_state),
         .candidate_indices = std::move(prediction.retrieval.candidate_indices),
@@ -336,11 +347,12 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         .predicted_state = std::move(prediction.state),
         .observed_state = state,
         .activation_mean = prediction.activation_mean,
-        .prediction_error = error,
         .reward = reward,
         .state_heat_stddev = state_heat,
         .op_heat_stddev = op_heat,
     };
+    apply_observation(tick_result, state, config_.curiosity_scale);
+    return tick_result;
 }
 
 TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_config) {

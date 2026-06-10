@@ -144,5 +144,6 @@ class Model {
 
 [[nodiscard]] float l2_norm(std::span<const float> values);
 [[nodiscard]] float dot_product(std::span<const float> a, std::span<const float> b);
+void apply_observation(Tick& tick, std::span<const float> observed, float curiosity_scale);
 
 } // namespace vvm

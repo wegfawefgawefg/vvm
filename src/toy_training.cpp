@@ -142,9 +142,7 @@ LossPoint train_toy_epoch(Model& model, std::span<const ToySample> train_samples
                 ((epoch * train_samples.size()) + order_index) * task_config.frames_per_sample +
                 frame;
             Tick tick = model.tick(state, rng, clock, sample.input);
-            tick.observed_state = sample.target;
-            tick.prediction_error =
-                Model::prediction_error(tick.predicted_state, tick.observed_state);
+            apply_observation(tick, sample.target, model.config().curiosity_scale);
 
             train_loss_sum += tick.prediction_error;
             ++trained_ticks;

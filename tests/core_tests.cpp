@@ -124,13 +124,13 @@ void test_train_window_updates_only_chosen_ops() {
         }
     }
 
-    tick.observed_state = tick.predicted_state;
-    tick.observed_state[active_index] += 0.5F;
-    const float target_norm = vvm::l2_norm(tick.observed_state);
-    for (float& value : tick.observed_state) {
+    std::vector<float> target = tick.predicted_state;
+    target[active_index] += 0.5F;
+    const float target_norm = vvm::l2_norm(target);
+    for (float& value : target) {
         value /= target_norm;
     }
-    tick.prediction_error = vvm::Model::prediction_error(tick.predicted_state, tick.observed_state);
+    vvm::apply_observation(tick, target, config.curiosity_scale);
 
     const std::vector<float> before(model.op_bank().begin(), model.op_bank().end());
 
@@ -197,6 +197,36 @@ void test_rejection_lowers_bad_op_affinity() {
     assert(after_affinity < before_affinity);
 }
 
+void test_observation_creates_curiosity_without_heat() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.curiosity_scale = 2.0F;
+    config.state_heat_stddev = 0.0F;
+    config.op_heat_stddev = 0.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    vvm::Tick tick = model.tick(state, rng, 0);
+    assert(tick.prediction_error == 0.0F);
+    assert(tick.reward.curiosity_reward == 0.0F);
+
+    std::vector<float> observed = tick.predicted_state;
+    observed[0] += 0.75F;
+    const float observed_norm = vvm::l2_norm(observed);
+    for (float& value : observed) {
+        value /= observed_norm;
+    }
+
+    vvm::apply_observation(tick, observed, config.curiosity_scale);
+    assert(tick.prediction_error > 0.0F);
+    assert(std::fabs(tick.reward.curiosity_reward -
+                     (config.curiosity_scale * tick.prediction_error)) < 1.0e-6F);
+    assert(std::fabs(tick.reward.total_reward - tick.reward.curiosity_reward) < 1.0e-6F);
+}
+
 void test_toy_training_runs() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -250,6 +280,7 @@ int main() {
     test_tick_masks_missing_external_reward();
     test_train_window_updates_only_chosen_ops();
     test_rejection_lowers_bad_op_affinity();
+    test_observation_creates_curiosity_without_heat();
     test_toy_training_runs();
     test_invalid_config();
 
