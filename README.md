@@ -50,5 +50,6 @@ and SDL3.
 - `src/visualizer_sdl3.cpp`: SDL3 inspection path.
 - `tests/`: deterministic core smoke tests.
 - `docs/vvm-seed-spec.md`: seed architecture notes.
+- `docs/model-architecture.md`: current model/training architecture.
 - `docs/continuous-vvm.md`: continuous-clock, curiosity, heat, and RL notes.
 - `resources/`: local research references.
