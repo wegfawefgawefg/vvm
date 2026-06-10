@@ -185,10 +185,25 @@ curiosity = prediction_error - noise_baseline
 
 ## External Goals
 
-Arbitrary goals enter as external scalar reward:
+Arbitrary goals enter as sparse external scalar reward.
+
+No external reward is not the same as observed zero reward. Missing reward must
+be masked so continuous unsupervised running does not train the machine on fake
+zero-reward data.
+
+Tick reward fields:
+
+```cpp
+float external_reward = 0.0F;
+bool has_external_reward = false;
+```
+
+Total reward:
 
 ```text
-total_reward_t = external_reward_t + beta * curiosity_reward_t
+total_reward_t = curiosity_weight * curiosity_reward_t
+if has_external_reward:
+    total_reward_t += external_weight * external_reward_t
 ```
 
 Examples:
@@ -201,6 +216,10 @@ Examples:
 
 The external reward stream is separate from prediction loss. Prediction trains
 the machine to model transitions. Reward trains it to prefer some transitions.
+
+External reward normalization/baselines should update only when
+`has_external_reward` is true. Do not insert missing rewards into statistics as
+zeros.
 
 ## Value
 
@@ -254,6 +273,7 @@ struct Tick {
     float prediction_error;
     float curiosity_reward;
     float external_reward;
+    bool has_external_reward;
     float total_reward;
     float value;
 };
@@ -366,6 +386,60 @@ Use:
 - row normalization after update
 
 Repeated chosen-op hits in one window can otherwise over-update a single vector.
+
+## Continuous Stability
+
+VVM is meant to run continuously, so the machine must not slowly decay into heat
+noise. Normalization alone is not enough; it preserves vector scale but does not
+guarantee useful structure.
+
+Use these safeguards:
+
+- Keep separate heat knobs for state and op bank.
+- Start with tiny heat and measure drift before increasing it.
+- Decay heat over wall-clock or lower it when prediction error stops improving.
+- Normalize state and op rows after heat and training updates.
+- Clip gradients before applying op updates.
+- Maintain surprise baselines so heat does not become an infinite reward source.
+- Prefer prediction progress over raw surprise for intrinsic reward.
+- Track op usage entropy and chosen-op churn.
+- Track state similarity to recent states and checkpoints.
+- Keep periodic stable snapshots of op bank for rollback or comparison.
+
+Useful stability metrics:
+
+```text
+prediction_error_mean
+prediction_error_slope
+curiosity_reward_mean
+state_norm
+op_norm_mean
+mean dot(S_t, S_t-1)
+mean dot(S_t, S_t-k)
+chosen_op_entropy
+candidate_entropy
+op_bank_drift_from_snapshot
+```
+
+Heat should not be treated as free creativity. It is an exploration pressure with
+a budget. If prediction error remains high but does not become learnable, the
+system is probably chasing noise. In that case reduce heat, subtract a noise
+baseline, or mask that source from curiosity.
+
+First anti-drift rule:
+
+```text
+if prediction_error is high and prediction_error_slope >= 0:
+    reduce effective heat
+```
+
+First curiosity rule:
+
+```text
+curiosity = max(previous_error_baseline - current_error, 0)
+```
+
+This rewards learning progress instead of permanent unpredictability.
 
 ## Core RL Machinery
 

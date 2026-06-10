@@ -115,11 +115,17 @@ instruction-like and makes truncated backprop simpler.
 
 ### Reinforcement
 
-External reward should enter as a scalar stream alongside intrinsic reward:
+External reward should enter as a masked scalar stream alongside intrinsic
+reward. Missing external reward is not the same as observed zero reward.
 
 ```text
-reward_total = reward_external + reward_curiosity
+reward_total = reward_curiosity
+if has_external_reward:
+    reward_total += reward_external
 ```
+
+Reward baselines and normalizers should update only on ticks where
+`has_external_reward` is true.
 
 The first RL hook should be a value estimate sampled from state:
 
