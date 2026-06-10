@@ -98,14 +98,22 @@ V0 reports:
 curiosity_reward = curiosity_scale * prediction_error
 ```
 
-This is a measured intrinsic reward scalar. It is useful for logging and for
-future control rules, but it does not create meaningful behavior by itself. A
-reward must be consumed by something:
+This is a measured intrinsic reward scalar. In the current code it is dormant:
+useful for logging and future experiments, but it does not create behavior by
+itself.
 
-- an environment action selector
-- candidate-op affinity updates
-- a value/return learner over a window
-- adaptive heat/input/update gain control
+For VVM, action selection is op selection:
+
+```text
+state/query -> top-k ops -> sampled chosen op
+```
+
+So future curiosity should act on op selection pressure, not directly on heat or
+input scale:
+
+- make useful surprising chosen paths more likely
+- combine with value/return learning over a window
+- stay separate from homeostatic gain control
 
 The next version should avoid rewarding uncontrollable heat forever. Candidate
 fixes:
@@ -211,7 +219,8 @@ candidate_entropy
 op_bank_drift
 ```
 
-Magnitudes can later be tuned with an auto-ISO style controller:
+Magnitudes can later be tuned with a separate auto-ISO style homeostatic
+controller:
 
 ```text
 if activation too low: raise input/update/heat scale slightly

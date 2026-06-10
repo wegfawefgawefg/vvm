@@ -192,18 +192,26 @@ So curiosity does not require heat. Heat is just one possible cause of mismatch.
 External observations, sample targets, environment transitions, or internal
 state perturbations can all create surprise.
 
-As implemented today, curiosity is a measured intrinsic reward scalar. By
-itself, this is not enough to create meaningful behavior. A reward only changes
-behavior once some control rule consumes it:
+As implemented today, curiosity is a measured intrinsic reward scalar. It is
+intentionally dormant for v0 experiments: it is logged and available in the tick
+cache, but it does not change heat, input scale, update scale, op affinity, or
+sampling behavior.
 
-- action selection in an environment
-- candidate-op affinity updates
-- value/return credit assignment over a recent window
-- heat/input gain control
+In VVM terms, behavior is op selection:
 
-Current VVM uses prediction error for local op-content training and optional
-weak rejection for bad op/query matches. It does not yet use curiosity to make
-actions or op choices more likely.
+```text
+state/query -> top-k ops -> sampled chosen op
+```
+
+So a future curiosity mechanism should primarily bias op selection pressure:
+
+- pull useful/surprising/learnable op matches closer to their query
+- alter chosen-path preference through a value/return rule
+- leave heat and input gain to a separate homeostatic controller
+
+Current VVM uses prediction error for local op-content training and optional weak
+rejection for bad op/query matches. It does not yet use curiosity to make op
+choices more likely.
 
 Raw surprise should also not be maximized blindly. That would reward noise,
 chaos, and self-generated instability. The desired signal is a mixture:
@@ -495,7 +503,7 @@ a budget. If prediction error remains high but does not become learnable, the
 system is probably chasing noise. In that case reduce heat, subtract a noise
 baseline, or mask that source from curiosity.
 
-An auto-gain loop can tune magnitudes like camera auto ISO:
+Homeostasis, separate from curiosity, can tune magnitudes like camera auto ISO:
 
 ```text
 target_activation = small positive band
