@@ -111,7 +111,8 @@ values train less often while preserving the same window.
 `--retrieval-temperature 0` keeps the default linear top-k weighting; positive
 values use softmax over top-k scores. `--rejection-overuse-scale` makes
 rejection focus on ops that are over-selected relative to the current epoch's
-usage distribution.
+usage distribution. `--restore-best` restores the best evaluated op bank at the
+end of a run; for class tasks it uses balanced accuracy, otherwise test loss.
 
 ## Layout
 

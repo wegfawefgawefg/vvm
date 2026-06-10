@@ -239,6 +239,15 @@ toward class 0, so the wider register gives the VM a stronger supervised state
 surface, but route drift remains unsolved. Width is not monotonic: 8 and 16
 registers underperformed, and 64 undertrained with the tested schedule.
 
+Schedule update for the 32-register setup: lowering learning rate to `0.00025`
+on the 1024/512 split peaked at `85.7%` balanced accuracy and stayed near
+`85.4%` at epoch 7. Lower momentum failed to make the class jump. Faster
+learning-rate decay with the original LR peaked around `85.4%` but still drifted
+hard late. `--restore-best` can now restore the best evaluated op bank at the
+end of a run, which is useful evidence that the VM can reach a better state even
+when later updates drift. It is a training harness guard, not a continuous
+online stability rule.
+
 The gradient path now has a finite-difference direction test for weighted
 targets, including op-row renormalization. That test passed, so the current
 MNIST bottleneck is less likely to be a simple weighted-loss sign or denominator

@@ -33,6 +33,7 @@ struct CliOptions {
     std::size_t epochs = 200;
     float readout_learning_rate = 0.1F;
     ReadoutSource readout_source = ReadoutSource::Input;
+    bool restore_best = false;
 };
 
 void print_usage() {
@@ -50,7 +51,7 @@ void print_usage() {
                  "[--class-start-frame N] [--class-registers N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
-                 "[--rejection-overuse-scale F] [--bptt]\n"
+                 "[--rejection-overuse-scale F] [--bptt] [--restore-best]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
@@ -203,6 +204,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
         }
         if (arg == "--sample-retrieval") {
             config.sample_retrieval = true;
+            continue;
+        }
+        if (arg == "--restore-best") {
+            cli_options.restore_best = true;
             continue;
         }
         if (i + 1 >= args.size()) {
@@ -626,9 +631,10 @@ int run_headless(const vvm::Config& config) {
 }
 
 int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_config,
-                      std::size_t epochs) {
+                      const CliOptions& cli_options) {
     vvm::Model model(config);
     const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+    const std::size_t epochs = cli_options.epochs;
     const std::vector<float> initial_bank(model.op_bank().begin(), model.op_bank().end());
 
     std::cout << "task=" << vvm::task_name(task_config.task) << " epochs=" << epochs
@@ -652,6 +658,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " rejection_overuse_scale=" << task_config.rejection_overuse_scale
               << " class_value_scale=" << task_config.class_value_scale
               << " class_loss_weight=" << task_config.class_loss_weight
+              << " restore_best=" << (cli_options.restore_best ? 1 : 0)
               << " bptt=" << (task_config.backprop_through_state ? 1 : 0)
               << " params=" << model.parameter_count() << '\n';
 
@@ -659,6 +666,9 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
     std::size_t best_accuracy_epoch = 0;
     float best_balanced_accuracy = -1.0F;
     std::size_t best_balanced_accuracy_epoch = 0;
+    float best_loss = std::numeric_limits<float>::infinity();
+    std::size_t best_loss_epoch = 0;
+    std::vector<float> best_bank;
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
         const std::vector<float> epoch_bank_before(model.op_bank().begin(), model.op_bank().end());
         const vvm::LossPoint loss =
@@ -671,6 +681,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << loss.train_loss
                   << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss
                   << " effective_lr=" << effective_lr;
+        bool saw_new_best = false;
         if (loss.accuracy_samples > 0U) {
             std::cout << " test_nonclass_loss=" << loss.test_nonclass_loss
                       << " test_class_loss=" << loss.test_class_loss;
@@ -681,6 +692,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
             if (loss.test_balanced_accuracy > best_balanced_accuracy) {
                 best_balanced_accuracy = loss.test_balanced_accuracy;
                 best_balanced_accuracy_epoch = epoch;
+                saw_new_best = true;
             }
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
             std::cout << " best_accuracy=" << (100.0F * best_accuracy) << "%" << "@"
@@ -695,6 +707,14 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
             if (loss.class_route_purity > 0.0F) {
                 std::cout << " route_purity=" << loss.class_route_purity;
             }
+        }
+        if (loss.accuracy_samples == 0U && loss.test_loss < best_loss) {
+            best_loss = loss.test_loss;
+            best_loss_epoch = epoch;
+            saw_new_best = true;
+        }
+        if (cli_options.restore_best && saw_new_best) {
+            best_bank.assign(model.op_bank().begin(), model.op_bank().end());
         }
         std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
                   << " learn_l2=" << loss.learning_update_l2 << " bank_delta_l2=" << bank_delta_l2
@@ -712,6 +732,17 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         print_top_floats("top_heat", loss.op_heat_l2_by_op);
         print_class_top_counts(loss.class_op_selection_counts, loss.label_counts.size(),
                                config.num_ops);
+        std::cout << '\n';
+    }
+    if (cli_options.restore_best && !best_bank.empty()) {
+        model.replace_op_bank(best_bank);
+        std::cout << "restored_best=";
+        if (best_balanced_accuracy >= 0.0F) {
+            std::cout << "balanced_accuracy:" << (100.0F * best_balanced_accuracy) << "%@"
+                      << best_balanced_accuracy_epoch;
+        } else {
+            std::cout << "test_loss:" << best_loss << "@" << best_loss_epoch;
+        }
         std::cout << '\n';
     }
     return 0;
@@ -879,7 +910,7 @@ int main(int argc, char** argv) {
         }
 
         if (command == "train-task") {
-            return run_task_training(config, task_config, cli_options.epochs);
+            return run_task_training(config, task_config, cli_options);
         }
 
         if (command == "train-readout") {

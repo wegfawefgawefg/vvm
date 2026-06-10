@@ -273,6 +273,11 @@ balanced accuracy on `mnist-01`, with much better class-1 recall than the
 two-register setup. A 1024/512 run peaked around `85.0%` before route drift
 pulled it toward class 0. Widths 8, 16, and 64 were worse in the tested schedule.
 
+With 32 registers on the 1024/512 split, `--lr 0.00025 --lr-decay 0.65`
+improves stability: it peaked at `85.7%` and ended around `85.4%`. `--restore-best`
+restores that best epoch after training, but it should be treated as an
+experiment harness feature rather than a final continuous-learning solution.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:
