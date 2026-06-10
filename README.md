@@ -44,6 +44,7 @@ cmake --build --preset dev-sdl3
 ./build/vvm train-task --task mnist-01 --state-dim 794 --ops 16 --candidates 8 --train-samples 512 --test-samples 256 --sample-frames 8 --window 8 --epochs 30 --lr 0.1 --rejection-scale 0.05
 ./build/vvm train-task --task mnist-01 --state-dim 786 --ops 512 --candidates 32 --train-samples 1024 --test-samples 512 --sample-frames 8 --window 8 --epochs 10 --lr 0.01 --max-grad-norm 0.1 --rejection-scale 0.02
 ./build/vvm train-task --task mnist-01 --state-dim 786 --ops 256 --candidates 16 --train-samples 512 --test-samples 256 --sample-frames 8 --window 8 --epochs 12 --lr 0.01 --max-grad-norm 0.1 --rejection-scale 0.04 --rejection-decay 0.85 --class-loss-weight 512
+./build/vvm train-task --task mnist-01 --state-dim 786 --ops 256 --candidates 16 --train-samples 512 --test-samples 256 --sample-frames 8 --window 8 --epochs 12 --lr 0.01 --max-grad-norm 0.1 --rejection-scale 0.04 --rejection-overuse-scale 1.0
 ./build/vvm train-task --task mnist --state-dim 794 --ops 2048 --candidates 8 --train-samples 512 --test-samples 128 --sample-frames 8 --window 8 --epochs 10 --lr 0.05
 ./build-sdl3/vvm visualize --steps 256
 ./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
@@ -82,12 +83,17 @@ mixed target: reconstruct the image region and set 10 digit registers in
 `mnist-01` uses the same image region with a two-class register for digits 0 and
 1. `train-task` also reports heat L2, summed learning update L2, actual op-bank
 delta L2 for the epoch, total drift from initialization, selected op count, max
-op reuse, normalized op-selection entropy, and the highest per-op heat/train
-pressure for the epoch. For class tasks it also prints label and prediction
-counts. `--hard-retrieval` uses the nearest op deterministically instead of
-sampling among top candidates. `--class-value-scale`, `--class-loss-weight`,
-and `--rejection-decay` are tuning knobs for register targets and anti-collapse
-pressure.
+op reuse, normalized op-selection entropy, and per-op pressure. Pressure is
+tracked as selection count, heat delta L2 sum, and training delta L2 sum for
+each op; the CLI prints the highest single op plus top-three `top_select`,
+`top_train`, and `top_heat` summaries each epoch. For class tasks it also prints
+label and prediction counts. `--hard-retrieval` uses the nearest op
+deterministically instead of sampling among top candidates. `--class-value-scale`,
+`--class-loss-weight`, and `--rejection-decay` are tuning knobs for register
+targets and anti-collapse pressure. `--rejection-overuse-scale` makes rejection
+focus on ops that are over-selected relative to the current epoch's usage
+distribution. Class tasks also report `class_margin`, the mean true-class
+register score minus the best other-class score.
 
 ## Layout
 

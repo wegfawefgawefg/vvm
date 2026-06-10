@@ -458,6 +458,13 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     if (train_config.rejection_threshold < 0.0F) {
         throw std::invalid_argument("rejection_threshold must be nonnegative");
     }
+    if (train_config.rejection_overuse_scale < 0.0F) {
+        throw std::invalid_argument("rejection_overuse_scale must be nonnegative");
+    }
+    if (!train_config.op_usage_counts.empty() &&
+        train_config.op_usage_counts.size() != config_.num_ops) {
+        throw std::invalid_argument("op_usage_counts size must match num_ops");
+    }
     if (ticks.empty()) {
         return TrainResult{};
     }
@@ -526,8 +533,22 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         const float rejection_excess = tick.prediction_error - train_config.rejection_threshold;
         if (train_config.rejection_scale > 0.0F && rejection_excess > 0.0F &&
             !tick.working_state.empty()) {
+            float usage_multiplier = 1.0F;
+            if (train_config.rejection_overuse_scale > 0.0F &&
+                !train_config.op_usage_counts.empty()) {
+                std::size_t total_usage = 0;
+                for (const std::size_t count : train_config.op_usage_counts) {
+                    total_usage += count;
+                }
+                const float expected_usage = std::max(
+                    1.0F, static_cast<float>(total_usage) / static_cast<float>(config_.num_ops));
+                const float op_usage =
+                    static_cast<float>(train_config.op_usage_counts[tick.chosen_op]);
+                const float overuse = std::max(0.0F, (op_usage - expected_usage) / expected_usage);
+                usage_multiplier = train_config.rejection_overuse_scale * overuse;
+            }
             const float rejection =
-                recency_weight * train_config.rejection_scale * rejection_excess;
+                recency_weight * train_config.rejection_scale * rejection_excess * usage_multiplier;
             for (std::size_t i = 0; i < config_.state_dim; ++i) {
                 gradients[op_offset + i] += rejection * tick.working_state[i];
             }

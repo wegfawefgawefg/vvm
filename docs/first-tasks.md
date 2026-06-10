@@ -235,6 +235,11 @@ Additional sweep result: stronger class-register loss (`--class-loss-weight
 0. This points toward smarter anti-collapse pressure rather than just stronger
 supervised register loss.
 
+Usage-aware rejection (`--rejection-overuse-scale`) keeps 256-op `mnist-01`
+usage broad, with roughly 190-200 selected ops and high entropy late in the run.
+It also exposes a rising positive `class_margin`, but accuracy still tends to
+sit around the high 60s / low 70s at this scale.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

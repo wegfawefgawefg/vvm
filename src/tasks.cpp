@@ -491,27 +491,36 @@ void validate_sample(const TaskSample& sample, std::size_t state_dim) {
     }
 }
 
-int predicted_class(std::span<const float> state, int class_count, std::size_t class_offset,
-                    VectorRange range) {
+float class_score(std::span<const float> state, int class_count, std::size_t class_offset,
+                  VectorRange range, int candidate) {
     if (class_count <= 0 || class_offset + static_cast<std::size_t>(class_count) > state.size()) {
         throw std::invalid_argument("invalid class count");
     }
+    if (candidate < 0 || candidate >= class_count) {
+        throw std::invalid_argument("invalid class candidate");
+    }
 
+    float score = 0.0F;
+    for (int i = 0; i < class_count; ++i) {
+        const bool matches = i == candidate;
+        const float value = state[class_offset + static_cast<std::size_t>(i)];
+        if (range == VectorRange::Signed) {
+            const float off_value =
+                class_count <= 2 ? -1.0F : -2.0F / static_cast<float>(class_count - 2);
+            score += value * (matches ? 1.0F : off_value);
+        } else if (matches) {
+            score += value;
+        }
+    }
+    return score;
+}
+
+int predicted_class(std::span<const float> state, int class_count, std::size_t class_offset,
+                    VectorRange range) {
     int best = 0;
     float best_score = -std::numeric_limits<float>::infinity();
     for (int candidate = 0; candidate < class_count; ++candidate) {
-        float score = 0.0F;
-        for (int i = 0; i < class_count; ++i) {
-            const bool matches = i == candidate;
-            const float value = state[class_offset + static_cast<std::size_t>(i)];
-            if (range == VectorRange::Signed) {
-                const float off_value =
-                    class_count <= 2 ? -1.0F : -2.0F / static_cast<float>(class_count - 2);
-                score += value * (matches ? 1.0F : off_value);
-            } else if (matches) {
-                score += value;
-            }
-        }
+        const float score = class_score(state, class_count, class_offset, range, candidate);
         if (score > best_score) {
             best = candidate;
             best_score = score;
@@ -614,6 +623,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.rejection_decay < 0.0F || task_config.rejection_decay > 1.0F) {
         throw std::invalid_argument("rejection_decay must be in [0, 1]");
     }
+    if (task_config.rejection_overuse_scale < 0.0F) {
+        throw std::invalid_argument("rejection_overuse_scale must be nonnegative");
+    }
     if (task_config.class_value_scale < 0.0F) {
         throw std::invalid_argument("class_value_scale must be nonnegative");
     }
@@ -680,6 +692,7 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
 
     std::mt19937 rng(task_config.seed ^ 0xBADC0DEU);
     float loss_sum = 0.0F;
+    float class_margin_sum = 0.0F;
     std::size_t correct = 0;
     std::size_t accuracy_samples = 0;
     int max_class_count = 0;
@@ -710,6 +723,20 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
         if (samples[i].label >= 0 && samples[i].class_count > 0) {
             const int predicted = predicted_class(
                 state, samples[i].class_count, samples[i].class_offset, task_config.vector_range);
+            const float label_score =
+                class_score(state, samples[i].class_count, samples[i].class_offset,
+                            task_config.vector_range, samples[i].label);
+            float best_other_score = -std::numeric_limits<float>::infinity();
+            for (int candidate = 0; candidate < samples[i].class_count; ++candidate) {
+                if (candidate == samples[i].label) {
+                    continue;
+                }
+                best_other_score =
+                    std::max(best_other_score,
+                             class_score(state, samples[i].class_count, samples[i].class_offset,
+                                         task_config.vector_range, candidate));
+            }
+            class_margin_sum += label_score - best_other_score;
             correct += predicted == samples[i].label ? 1U : 0U;
             if (static_cast<std::size_t>(samples[i].label) < label_counts.size()) {
                 ++label_counts[static_cast<std::size_t>(samples[i].label)];
@@ -725,6 +752,8 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
         .accuracy = accuracy_samples == 0U
                         ? 0.0F
                         : static_cast<float>(correct) / static_cast<float>(accuracy_samples),
+        .mean_class_margin =
+            accuracy_samples == 0U ? 0.0F : class_margin_sum / static_cast<float>(accuracy_samples),
         .accuracy_samples = accuracy_samples,
         .label_counts = std::move(label_counts),
         .prediction_counts = std::move(prediction_counts),
@@ -756,6 +785,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     train_config.rejection_scale = task_config.rejection_scale *
                                    std::pow(task_config.rejection_decay, static_cast<float>(epoch));
     train_config.rejection_threshold = task_config.rejection_threshold;
+    train_config.rejection_overuse_scale = task_config.rejection_overuse_scale;
 
     std::mt19937 rng(task_config.seed ^ static_cast<std::uint32_t>(epoch * 0x9E3779B9U));
     std::vector<std::size_t> order(train_samples.size());
@@ -772,6 +802,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     diagnostics.op_selection_counts.assign(model.config().num_ops, 0U);
     diagnostics.op_heat_l2_by_op.assign(model.config().num_ops, 0.0F);
     diagnostics.op_train_l2_by_op.assign(model.config().num_ops, 0.0F);
+    train_config.op_usage_counts = diagnostics.op_selection_counts;
 
     for (std::size_t order_index = 0; order_index < order.size(); ++order_index) {
         const TaskSample& sample = train_samples[order[order_index]];
@@ -831,6 +862,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         self_ticks == 0U ? 0.0F : self_loss_sum / static_cast<float>(self_ticks);
     diagnostics.test_loss = metrics.loss;
     diagnostics.test_accuracy = metrics.accuracy;
+    diagnostics.mean_class_margin = metrics.mean_class_margin;
     diagnostics.accuracy_samples = metrics.accuracy_samples;
     diagnostics.label_counts = metrics.label_counts;
     diagnostics.prediction_counts = metrics.prediction_counts;

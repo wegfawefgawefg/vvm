@@ -152,6 +152,27 @@ to avoid op collapse, but persistent rejection can drag learned attractors. The
 next likely fix is making rejection conditional on local overuse or decaying it
 based on measured op entropy rather than blindly by epoch.
 
+Usage-aware rejection is now available:
+
+```text
+--rejection-overuse-scale F
+```
+
+When this is positive, rejection is multiplied by how over-selected the chosen
+op is relative to uniform epoch usage. On `mnist-01`, this keeps op usage much
+broader than no rejection and avoids the extreme class-0 collapse, but still
+does not fully solve the task.
+
+Class tasks also report:
+
+```text
+class_margin = score(true class) - max score(other classes)
+```
+
+For `mnist-01`, class margin rises under usage-aware rejection even when accuracy
+wobbles, so the class registers are learning a weak signal. The remaining issue
+is turning that weak register separation into stable convergence.
+
 Further probes:
 
 - keep homogeneous ops but add a small readout socket to ask whether class
@@ -282,6 +303,22 @@ Training diagnostics track heat pressure explicitly:
 state_heat_l2  L2 norm of state heat noise added during the epoch
 op_heat_l2     L2 norm of op-bank heat noise added during the epoch
 learn_l2       L2 norm of actual op-bank changes from learning updates
+```
+
+Per-op pressure is tracked too:
+
+```text
+op_selection_counts[op]  how often the op was executed
+op_heat_l2_by_op[op]     summed heat delta L2 applied to that op
+op_train_l2_by_op[op]    summed training update L2 applied to that op
+```
+
+The CLI prints compact top-three summaries:
+
+```text
+top_select=[op:count,...]
+top_train=[op:l2,...]
+top_heat=[op:l2,...]
 ```
 
 If heat is comparable to or larger than learning updates for long runs, the

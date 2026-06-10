@@ -54,6 +54,7 @@ struct TaskConfig {
     float rejection_scale = 0.0F;
     float rejection_threshold = 0.02F;
     float rejection_decay = 1.0F;
+    float rejection_overuse_scale = 0.0F;
     float class_value_scale = 2.0F;
     float class_loss_weight = 0.0F;
     VectorRange vector_range = VectorRange::Signed;
@@ -64,6 +65,7 @@ struct TaskConfig {
 struct EvalMetrics {
     float loss = 0.0F;
     float accuracy = 0.0F;
+    float mean_class_margin = 0.0F;
     std::size_t accuracy_samples = 0;
     std::vector<std::size_t> label_counts;
     std::vector<std::size_t> prediction_counts;
@@ -74,6 +76,7 @@ struct LossPoint {
     float self_loss = 0.0F;
     float test_loss = 0.0F;
     float test_accuracy = 0.0F;
+    float mean_class_margin = 0.0F;
     float state_heat_l2 = 0.0F;
     float op_heat_l2 = 0.0F;
     float learning_update_l2 = 0.0F;

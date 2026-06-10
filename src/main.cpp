@@ -46,7 +46,8 @@ void print_usage() {
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
                  "[--idle-frames N] [--window N] [--lr F] [--class-loss-weight F] "
-                 "[--class-value-scale F] [--rejection-decay F]\n"
+                 "[--class-value-scale F] [--rejection-decay F] "
+                 "[--rejection-overuse-scale F]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
@@ -317,6 +318,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_float(value, task_config.rejection_decay)) {
                 return false;
             }
+        } else if (arg == "--rejection-overuse-scale") {
+            if (!parse_float(value, task_config.rejection_overuse_scale)) {
+                return false;
+            }
         } else if (arg == "--class-value-scale") {
             if (!parse_float(value, task_config.class_value_scale)) {
                 return false;
@@ -354,6 +359,78 @@ void print_counts(std::string_view name, std::span<const std::size_t> counts) {
             std::cout << ',';
         }
         std::cout << counts[i];
+    }
+    std::cout << ']';
+}
+
+void print_top_counts(std::string_view name, std::span<const std::size_t> counts,
+                      std::size_t limit = 3U) {
+    if (counts.empty() || limit == 0U) {
+        return;
+    }
+
+    std::vector<std::pair<std::size_t, std::size_t>> ranked;
+    ranked.reserve(counts.size());
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+        if (counts[i] > 0U) {
+            ranked.emplace_back(counts[i], i);
+        }
+    }
+    if (ranked.empty()) {
+        return;
+    }
+
+    const std::size_t shown = std::min(limit, ranked.size());
+    std::partial_sort(ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(shown),
+                      ranked.end(), [](const auto& lhs, const auto& rhs) {
+                          if (lhs.first != rhs.first) {
+                              return lhs.first > rhs.first;
+                          }
+                          return lhs.second < rhs.second;
+                      });
+
+    std::cout << ' ' << name << "=[";
+    for (std::size_t i = 0; i < shown; ++i) {
+        if (i > 0U) {
+            std::cout << ',';
+        }
+        std::cout << ranked[i].second << ':' << ranked[i].first;
+    }
+    std::cout << ']';
+}
+
+void print_top_floats(std::string_view name, std::span<const float> values,
+                      std::size_t limit = 3U) {
+    if (values.empty() || limit == 0U) {
+        return;
+    }
+
+    std::vector<std::pair<float, std::size_t>> ranked;
+    ranked.reserve(values.size());
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (values[i] > 0.0F) {
+            ranked.emplace_back(values[i], i);
+        }
+    }
+    if (ranked.empty()) {
+        return;
+    }
+
+    const std::size_t shown = std::min(limit, ranked.size());
+    std::partial_sort(ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(shown),
+                      ranked.end(), [](const auto& lhs, const auto& rhs) {
+                          if (lhs.first != rhs.first) {
+                              return lhs.first > rhs.first;
+                          }
+                          return lhs.second < rhs.second;
+                      });
+
+    std::cout << ' ' << name << "=[";
+    for (std::size_t i = 0; i < shown; ++i) {
+        if (i > 0U) {
+            std::cout << ',';
+        }
+        std::cout << ranked[i].second << ':' << ranked[i].first;
     }
     std::cout << ']';
 }
@@ -467,6 +544,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " rejection_scale=" << task_config.rejection_scale
               << " rejection_threshold=" << task_config.rejection_threshold
               << " rejection_decay=" << task_config.rejection_decay
+              << " rejection_overuse_scale=" << task_config.rejection_overuse_scale
               << " class_value_scale=" << task_config.class_value_scale
               << " class_loss_weight=" << task_config.class_loss_weight
               << " params=" << model.parameter_count() << '\n';
@@ -481,6 +559,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                   << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss;
         if (loss.accuracy_samples > 0U) {
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
+            std::cout << " class_margin=" << loss.mean_class_margin;
             print_counts("labels", loss.label_counts);
             print_counts("preds", loss.prediction_counts);
         }
@@ -492,6 +571,9 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                   << " selected_ops=" << loss.selected_ops << "/" << config.num_ops
                   << " max_op_select=" << loss.max_op_selections
                   << " op_entropy=" << loss.op_selection_entropy;
+        print_top_counts("top_select", loss.op_selection_counts);
+        print_top_floats("top_train", loss.op_train_l2_by_op);
+        print_top_floats("top_heat", loss.op_heat_l2_by_op);
         std::cout << '\n';
     }
     return 0;
