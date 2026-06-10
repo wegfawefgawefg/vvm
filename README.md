@@ -80,6 +80,9 @@ of state space.
 MNIST v0 maps each 28x28 image into the first 784 state dimensions and trains a
 mixed target: reconstruct the image region and set 10 digit registers in
 `state[784..793]`. The CLI reports exact `test_accuracy` for class-like tasks.
+Task evaluation uses deterministic nearest-op retrieval so reported test metrics
+are stable; training may still sample among top candidates unless
+`--hard-retrieval` is passed.
 `mnist-01` uses the same image region with a two-class register for digits 0 and
 1. `train-task` also reports heat L2, summed learning update L2, actual op-bank
 delta L2 for the epoch, total drift from initialization, selected op count, max

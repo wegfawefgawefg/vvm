@@ -169,9 +169,24 @@ Class tasks also report:
 class_margin = score(true class) - max score(other classes)
 ```
 
+Task evaluation uses deterministic nearest-op retrieval even when training uses
+sampled top-k retrieval. This makes reported `test_loss`, `test_accuracy`, and
+`class_margin` stable convergence metrics. The runtime and training path can
+still sample ops.
+
 For `mnist-01`, class margin rises under usage-aware rejection even when accuracy
 wobbles, so the class registers are learning a weak signal. The remaining issue
 is turning that weak register separation into stable convergence.
+
+Class-conditioned route diagnostics report the top selected ops per label:
+
+```text
+class_top=[0:op:count,...;1:op:count,...]
+route_purity = sum_op max_label_count(op) / labeled_op_selections
+```
+
+For two labels, `route_purity` near 0.5 means both labels are using the same op
+routes. Values closer to 1.0 mean selected ops are label-specialized.
 
 Further probes:
 

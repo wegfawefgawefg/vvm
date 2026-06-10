@@ -435,6 +435,52 @@ void print_top_floats(std::string_view name, std::span<const float> values,
     std::cout << ']';
 }
 
+void print_class_top_counts(std::span<const std::size_t> counts, std::size_t class_count,
+                            std::size_t num_ops, std::size_t limit = 3U,
+                            std::size_t max_classes = 4U) {
+    if (counts.empty() || class_count == 0U || num_ops == 0U ||
+        counts.size() < class_count * num_ops) {
+        return;
+    }
+
+    const std::size_t shown_classes = std::min(class_count, max_classes);
+    std::cout << " class_top=[";
+    for (std::size_t label = 0; label < shown_classes; ++label) {
+        if (label > 0U) {
+            std::cout << ';';
+        }
+        std::cout << label << ':';
+        const std::span<const std::size_t> class_counts(counts.data() + (label * num_ops),
+                                                        num_ops);
+        std::vector<std::pair<std::size_t, std::size_t>> ranked;
+        ranked.reserve(num_ops);
+        for (std::size_t op = 0; op < num_ops; ++op) {
+            if (class_counts[op] > 0U) {
+                ranked.emplace_back(class_counts[op], op);
+            }
+        }
+        const std::size_t shown = std::min(limit, ranked.size());
+        if (shown == 0U) {
+            std::cout << '-';
+            continue;
+        }
+        std::partial_sort(ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(shown),
+                          ranked.end(), [](const auto& lhs, const auto& rhs) {
+                              if (lhs.first != rhs.first) {
+                                  return lhs.first > rhs.first;
+                              }
+                              return lhs.second < rhs.second;
+                          });
+        for (std::size_t i = 0; i < shown; ++i) {
+            if (i > 0U) {
+                std::cout << ',';
+            }
+            std::cout << ranked[i].second << ':' << ranked[i].first;
+        }
+    }
+    std::cout << ']';
+}
+
 std::size_t infer_class_count(std::span<const vvm::TaskSample> samples) {
     int class_count = 0;
     for (const vvm::TaskSample& sample : samples) {
@@ -549,6 +595,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " class_loss_weight=" << task_config.class_loss_weight
               << " params=" << model.parameter_count() << '\n';
 
+    float best_accuracy = -1.0F;
+    std::size_t best_accuracy_epoch = 0;
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
         const std::vector<float> epoch_bank_before(model.op_bank().begin(), model.op_bank().end());
         const vvm::LossPoint loss =
@@ -558,10 +606,19 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << loss.train_loss
                   << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss;
         if (loss.accuracy_samples > 0U) {
+            if (loss.test_accuracy > best_accuracy) {
+                best_accuracy = loss.test_accuracy;
+                best_accuracy_epoch = epoch;
+            }
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
+            std::cout << " best_accuracy=" << (100.0F * best_accuracy) << "%"
+                      << "@" << best_accuracy_epoch;
             std::cout << " class_margin=" << loss.mean_class_margin;
             print_counts("labels", loss.label_counts);
             print_counts("preds", loss.prediction_counts);
+            if (loss.class_route_purity > 0.0F) {
+                std::cout << " route_purity=" << loss.class_route_purity;
+            }
         }
         std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
                   << " learn_l2=" << loss.learning_update_l2 << " bank_delta_l2=" << bank_delta_l2
@@ -574,6 +631,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         print_top_counts("top_select", loss.op_selection_counts);
         print_top_floats("top_train", loss.op_train_l2_by_op);
         print_top_floats("top_heat", loss.op_heat_l2_by_op);
+        print_class_top_counts(loss.class_op_selection_counts, loss.label_counts.size(),
+                               config.num_ops);
         std::cout << '\n';
     }
     return 0;

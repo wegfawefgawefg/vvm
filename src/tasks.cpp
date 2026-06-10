@@ -529,7 +529,8 @@ int predicted_class(std::span<const float> state, int class_count, std::size_t c
     return best;
 }
 
-void record_tick_diagnostics(const Tick& tick, LossPoint& loss) {
+void record_tick_diagnostics(const Tick& tick, const TaskSample& sample, std::size_t num_ops,
+                             LossPoint& loss) {
     loss.state_heat_l2 += tick.state_heat_l2;
     loss.op_heat_l2 += tick.op_heat_l2;
     if (!tick.op_heat_l2_by_op.empty()) {
@@ -546,6 +547,13 @@ void record_tick_diagnostics(const Tick& tick, LossPoint& loss) {
     if (tick.chosen_op < loss.op_selection_counts.size()) {
         ++loss.op_selection_counts[tick.chosen_op];
         ++loss.total_selections;
+    }
+    if (sample.label >= 0 && sample.class_count > 0 && tick.chosen_op < num_ops) {
+        const std::size_t label = static_cast<std::size_t>(sample.label);
+        const std::size_t offset = label * num_ops;
+        if (offset + tick.chosen_op < loss.class_op_selection_counts.size()) {
+            ++loss.class_op_selection_counts[offset + tick.chosen_op];
+        }
     }
 }
 
@@ -598,6 +606,29 @@ void finalize_op_usage(LossPoint& loss) {
         if (loss.op_train_l2_by_op[op] > loss.max_op_train_l2) {
             loss.max_op_train_l2 = loss.op_train_l2_by_op[op];
             loss.max_op_train_index = op;
+        }
+    }
+
+    const std::size_t num_ops = loss.op_selection_counts.size();
+    if (num_ops > 0U && !loss.class_op_selection_counts.empty() &&
+        loss.class_op_selection_counts.size() % num_ops == 0U) {
+        const std::size_t class_count = loss.class_op_selection_counts.size() / num_ops;
+        std::size_t labeled_total = 0;
+        std::size_t majority_total = 0;
+        for (std::size_t op = 0; op < num_ops; ++op) {
+            std::size_t op_total = 0;
+            std::size_t op_majority = 0;
+            for (std::size_t label = 0; label < class_count; ++label) {
+                const std::size_t count = loss.class_op_selection_counts[(label * num_ops) + op];
+                op_total += count;
+                op_majority = std::max(op_majority, count);
+            }
+            labeled_total += op_total;
+            majority_total += op_majority;
+        }
+        if (labeled_total > 0U) {
+            loss.class_route_purity =
+                static_cast<float>(majority_total) / static_cast<float>(labeled_total);
         }
     }
 }
@@ -690,7 +721,6 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
         return EvalMetrics{};
     }
 
-    std::mt19937 rng(task_config.seed ^ 0xBADC0DEU);
     float loss_sum = 0.0F;
     float class_margin_sum = 0.0F;
     std::size_t correct = 0;
@@ -705,14 +735,11 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
         validate_sample(samples[i], model.config().state_dim);
         std::vector<float> state = neutral_state(model.config().state_dim);
         for (std::size_t frame = 0; frame < task_config.frames_per_sample; ++frame) {
-            (void)model.tick(state, rng, (i * task_config.frames_per_sample) + frame,
-                             samples[i].input);
+            state = model.predict_next(state, samples[i].input);
         }
         if (task_config.task == TaskKind::DelayedCopy) {
             for (std::size_t frame = 0; frame < task_config.idle_frames_between_samples; ++frame) {
-                (void)model.tick(state, rng,
-                                 (i * task_config.frames_per_sample) +
-                                     task_config.frames_per_sample + frame);
+                state = model.predict_next(state);
             }
         }
 
@@ -802,6 +829,14 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     diagnostics.op_selection_counts.assign(model.config().num_ops, 0U);
     diagnostics.op_heat_l2_by_op.assign(model.config().num_ops, 0.0F);
     diagnostics.op_train_l2_by_op.assign(model.config().num_ops, 0.0F);
+    int max_class_count = 0;
+    for (const TaskSample& sample : train_samples) {
+        max_class_count = std::max(max_class_count, sample.class_count);
+    }
+    if (max_class_count > 0) {
+        diagnostics.class_op_selection_counts.assign(
+            static_cast<std::size_t>(max_class_count) * model.config().num_ops, 0U);
+    }
     train_config.op_usage_counts = diagnostics.op_selection_counts;
 
     for (std::size_t order_index = 0; order_index < order.size(); ++order_index) {
@@ -819,7 +854,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
             Tick tick = model.tick(state, rng, clock, sample.input);
             apply_observation(tick, sample.target, model.config().curiosity_scale,
                               sample.target_weights);
-            record_tick_diagnostics(tick, diagnostics);
+            record_tick_diagnostics(tick, sample, model.config().num_ops, diagnostics);
 
             train_loss_sum += tick.prediction_error;
             ++trained_ticks;
@@ -842,7 +877,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                 apply_observation(tick, sample.target, model.config().curiosity_scale,
                                   sample.target_weights);
             }
-            record_tick_diagnostics(tick, diagnostics);
+            record_tick_diagnostics(tick, sample, model.config().num_ops, diagnostics);
 
             self_loss_sum += tick.prediction_error;
             ++self_ticks;
