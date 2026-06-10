@@ -111,13 +111,14 @@ state[0..783]    image reconstruction region
 state[784..793]  digit registers
 ```
 
-This is only a target layout, not a separate addressing/writing split. The whole
-state still addresses the next op, the chosen op updates the whole state, and
-the loss is measured on constrained dimensions. Reconstructing the image region
-is the world-model constraint. Setting class registers is an additional
-supervised constraint on the same signal path. Both losses push through the same
-state trajectory and selected op, with dimension weights controlling how much
-each constraint contributes.
+This is only a target layout, not a separate addressing/writing split. The image
+region does not own addressing, and the class registers do not own writing. The
+whole state still addresses the next op, the chosen op updates the whole state,
+and losses are measured wherever a task applies constraints. Reconstructing the
+image region is the world-model constraint. Setting class registers is an
+additional supervised constraint on the same signal path. Both losses push
+through the same state trajectory and selected op, with dimension weights and
+timing controlling how much each constraint contributes.
 
 Current diagnostic ladder:
 
@@ -141,9 +142,11 @@ class-only prototype.
 
 Weighted observations are now supported for no-socket state targets. This lets
 tasks keep reconstruction pressure on input dimensions while applying stronger
-loss to class registers. Binary MNIST improves with more ops and weighted class
-registers; a 512-op, 1024-sample run reached about 76% on `mnist-01`, but it is
-not solved yet.
+loss to class registers. Binary MNIST improves with more ops, weighted class
+registers, momentum, and delayed class supervision. The best current 256-op
+`mnist-01` run reached about `80.5%` balanced accuracy with class loss starting
+on frame 2 while reconstruction stayed active from frame 0. It is better, but it
+is not solved yet.
 
 Optional truncated BPTT is available through `--bptt`. The default trainer is a
 local one-step update over the window, which is intentionally simple but does not
@@ -157,6 +160,8 @@ Tuning notes:
 - `--class-loss-weight` increases the gradient pressure on class registers.
 - `--class-value-scale` changes the class register target amplitude before
   target normalization.
+- `--class-start-frame` delays class-register loss within each shown sample
+  while keeping reconstruction/world-model pressure active.
 - `--lr-decay` reduces learning rate by epoch.
 - `--momentum` enables optimizer momentum over op-bank updates.
 - `--rejection-decay` reduces rejection pressure by epoch.
@@ -191,6 +196,11 @@ registers. Plain SGD under the same basic setup peaked lower or drifted harder.
 Larger banks (`512` ops) spread usage but performed worse with this schedule;
 smaller banks show a capacity boundary (`128` ops near `78%`, `64` ops near
 collapse/random).
+
+Extra class-1 weighting was tested after the 80.5% run because the model
+underpredicted digit 1. It overcorrected toward class 1 and dropped balanced
+accuracy to about `75-76%`, so the current bottleneck is not simple class prior
+weighting.
 
 The gradient path now has a finite-difference direction test for weighted
 targets, including op-row renormalization. That test passed, so the current

@@ -224,11 +224,15 @@ Early result: the loader/training path works, but pure label-prototype MNIST
 stayed near random accuracy. That version made the image query and digit target
 too dissimilar. The current probe preserves image state and adds digit-register
 constraints so the core gets both sample reconstruction/world-model pressure and
-class determination pressure from the same state trajectory.
+class determination pressure from the same state trajectory. These are measured
+constraints on one recurrent signal path, not a split where the image addresses
+and the class registers write.
 
-Latest no-socket result: `mnist-01` improves with weighted class-register loss
-and more ops. A 512-op, 1024-sample run reached about 76% with broad op usage,
-but it is not converged. 10-class MNIST remains unsolved. Linear readout sockets
+Latest no-socket result: `mnist-01` improves with weighted class-register loss,
+momentum, and delayed class supervision. The best current 256-op run starts
+class-register loss on frame 2, keeps image reconstruction active from frame 0,
+and reaches about `80.5%` balanced accuracy on the balanced 0-vs-1 test split.
+It is not converged. 10-class MNIST remains unsolved. Linear readout sockets
 still solve the same raw inputs easily, so the remaining problem is in the VVM
 core retrieval/update dynamics rather than the data loader.
 
@@ -242,6 +246,11 @@ Usage-aware rejection (`--rejection-overuse-scale`) keeps 256-op `mnist-01`
 usage broad, with roughly 190-200 selected ops and high entropy late in the run.
 It also exposes a rising positive `class_margin`, but accuracy still tends to
 sit around the high 60s / low 70s at this scale.
+
+Per-class target weighting was also tested to compensate for the 80.5% run's
+lower digit-1 recall. Weighting digit 1 more strongly overcorrected toward
+predicting digit 1 and lowered balanced accuracy to about `75-76%`, so class
+imbalance is a symptom rather than the main fix.
 
 ### 8. CartPole Observation Prediction
 
