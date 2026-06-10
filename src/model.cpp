@@ -54,15 +54,19 @@ float decayed(float value, float decay, std::size_t clock) {
     return value * std::pow(decay, static_cast<float>(clock));
 }
 
-void apply_heat(std::span<float> values, float stddev, std::mt19937& rng) {
+float apply_heat(std::span<float> values, float stddev, std::mt19937& rng) {
     if (stddev <= 0.0F) {
-        return;
+        return 0.0F;
     }
 
     std::normal_distribution<float> noise(0.0F, stddev);
+    float noise_norm_sq = 0.0F;
     for (float& value : values) {
-        value += noise(rng);
+        const float delta = noise(rng);
+        value += delta;
+        noise_norm_sq += delta * delta;
     }
+    return std::sqrt(noise_norm_sq);
 }
 
 std::size_t sample_weighted(std::span<const float> weights, std::mt19937& rng) {
@@ -348,7 +352,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
     }
 
     const float op_heat = decayed(config_.op_heat_stddev, config_.heat_decay, clock);
-    heat_op_bank(op_heat, rng);
+    const float op_heat_l2 = heat_op_bank(op_heat, rng);
 
     std::vector<float> state_before(state.begin(), state.end());
     std::vector<float> working_state(state.begin(), state.end());
@@ -361,7 +365,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
     state = prediction.state;
 
     const float state_heat = decayed(config_.state_heat_stddev, config_.heat_decay, clock);
-    apply_heat(state, state_heat, rng);
+    const float state_heat_l2 = apply_heat(state, state_heat, rng);
     normalize_l2(state);
 
     const float chosen_prob = [&prediction]() {
@@ -390,6 +394,8 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         .reward = reward,
         .state_heat_stddev = state_heat,
         .op_heat_stddev = op_heat,
+        .state_heat_l2 = state_heat_l2,
+        .op_heat_l2 = op_heat_l2,
     };
     apply_observation(tick_result, state, config_.curiosity_scale);
     return tick_result;
@@ -476,12 +482,18 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     }
 
     std::size_t updated_ops = 0;
+    float learning_update_norm_sq = 0.0F;
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
         if (op_counts[op] == 0U) {
             continue;
         }
 
         const std::size_t op_offset = op * config_.state_dim;
+        std::vector<float> before(config_.state_dim);
+        for (std::size_t i = 0; i < config_.state_dim; ++i) {
+            before[i] = op_bank_[op_offset + i];
+        }
+
         float scale = 1.0F / weight_sum;
         if (train_config.average_repeated_ops && op_counts[op] > 0U) {
             scale /= static_cast<float>(op_counts[op]);
@@ -504,26 +516,32 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
                 train_config.learning_rate * clip_scale * gradients[op_offset + i];
         }
         normalize_op(op);
+        for (std::size_t i = 0; i < config_.state_dim; ++i) {
+            const float delta = op_bank_[op_offset + i] - before[i];
+            learning_update_norm_sq += delta * delta;
+        }
         ++updated_ops;
     }
 
     return TrainResult{
         .loss = weighted_loss / weight_sum,
         .mean_prediction_error = error_sum / static_cast<float>(ticks.size()),
+        .learning_update_l2 = std::sqrt(learning_update_norm_sq),
         .tick_count = ticks.size(),
         .updated_ops = updated_ops,
     };
 }
 
-void Model::heat_op_bank(float stddev, std::mt19937& rng) {
+float Model::heat_op_bank(float stddev, std::mt19937& rng) {
     if (stddev <= 0.0F) {
-        return;
+        return 0.0F;
     }
 
-    apply_heat(op_bank_, stddev, rng);
+    const float heat_l2 = apply_heat(op_bank_, stddev, rng);
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
         normalize_op(op);
     }
+    return heat_l2;
 }
 
 void Model::normalize_op(std::size_t op) {
@@ -563,6 +581,8 @@ RunResult Model::run(std::span<const float> initial_state) {
             .curiosity_reward = tick_result.reward.curiosity_reward,
             .state_heat_stddev = tick_result.state_heat_stddev,
             .op_heat_stddev = tick_result.op_heat_stddev,
+            .state_heat_l2 = tick_result.state_heat_l2,
+            .op_heat_l2 = tick_result.op_heat_l2,
         });
     }
 

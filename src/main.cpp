@@ -313,6 +313,11 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         if (loss.accuracy_samples > 0U) {
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
         }
+        std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
+                  << " learn_l2=" << loss.learning_update_l2
+                  << " selected_ops=" << loss.selected_ops << "/" << config.num_ops
+                  << " max_op_select=" << loss.max_op_selections
+                  << " op_entropy=" << loss.op_selection_entropy;
         std::cout << '\n';
     }
     return 0;
@@ -373,8 +378,13 @@ int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, st
         if (loss.accuracy_samples > 0U) {
             std::cout << " final_accuracy=" << (100.0F * loss.test_accuracy) << "%";
         }
-        std::cout << " seconds=" << seconds << " train_ticks=" << train_ticks
-                  << " tick_rate=" << tick_rate << " epoch_rate=" << epoch_rate << '\n';
+        std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
+                  << " learn_l2=" << loss.learning_update_l2
+                  << " selected_ops=" << loss.selected_ops << "/" << config.num_ops
+                  << " max_op_select=" << loss.max_op_selections
+                  << " op_entropy=" << loss.op_selection_entropy << " seconds=" << seconds
+                  << " train_ticks=" << train_ticks << " tick_rate=" << tick_rate
+                  << " epoch_rate=" << epoch_rate << '\n';
     }
 
     return 0;

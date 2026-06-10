@@ -129,6 +129,35 @@ void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const TaskConfi
         SDL_RenderLine(renderer, self_prev.x, self_prev.y, self_now.x, self_now.y);
     }
 
+    float max_diag = 1.0e-6F;
+    for (const LossPoint& point : history) {
+        max_diag = std::max(max_diag, point.state_heat_l2 + point.op_heat_l2);
+        max_diag = std::max(max_diag, point.learning_update_l2);
+    }
+    max_diag *= 1.05F;
+
+    auto diag_point_for = [&](std::size_t i, float value) {
+        const std::size_t target_epoch_count = std::max<std::size_t>(1U, target_epochs);
+        const float denom = std::max(1.0F, static_cast<float>(target_epoch_count - 1U));
+        const float x = left + (static_cast<float>(i) / denom) * graph_width;
+        const float y = bottom - std::clamp(value / max_diag, 0.0F, 1.0F) * graph_height;
+        return SDL_FPoint{x, y};
+    };
+
+    for (std::size_t i = 1; i < history.size(); ++i) {
+        const SDL_FPoint heat_prev =
+            diag_point_for(i - 1U, history[i - 1U].state_heat_l2 + history[i - 1U].op_heat_l2);
+        const SDL_FPoint heat_now =
+            diag_point_for(i, history[i].state_heat_l2 + history[i].op_heat_l2);
+        SDL_SetRenderDrawColor(renderer, 245, 95, 95, 255);
+        SDL_RenderLine(renderer, heat_prev.x, heat_prev.y, heat_now.x, heat_now.y);
+
+        const SDL_FPoint learn_prev = diag_point_for(i - 1U, history[i - 1U].learning_update_l2);
+        const SDL_FPoint learn_now = diag_point_for(i, history[i].learning_update_l2);
+        SDL_SetRenderDrawColor(renderer, 185, 145, 255, 255);
+        SDL_RenderLine(renderer, learn_prev.x, learn_prev.y, learn_now.x, learn_now.y);
+    }
+
     const LossPoint latest = history.empty() ? LossPoint{} : history.back();
     const double mib = static_cast<double>(model.parameter_bytes()) / (1024.0 * 1024.0);
 
@@ -136,14 +165,19 @@ void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const TaskConfi
     std::snprintf(overlay, sizeof(overlay),
                   "vvm task training  epoch=%zu/%zu  params=%zu  %.2f MiB\n"
                   "train_loss=%.6f  self_loss=%.6f  test_loss=%.6f  max_loss=%.6f\n"
+                  "heat_l2=%.6f  learn_l2=%.6f  ops=%zu/%zu  max_op=%zu  entropy=%.3f\n"
                   "samples train=%zu test=%zu  sample_frames=%zu  idle_frames=%zu  window=%zu  "
                   "lr=%.4f  reject=%.4f@%.4f",
                   history.size(), target_epochs, model.parameter_count(), mib,
                   static_cast<double>(latest.train_loss), static_cast<double>(latest.self_loss),
                   static_cast<double>(latest.test_loss), static_cast<double>(max_loss),
-                  task_config.train_samples, task_config.test_samples,
-                  task_config.frames_per_sample, task_config.idle_frames_between_samples,
-                  task_config.window_size, static_cast<double>(task_config.learning_rate),
+                  static_cast<double>(latest.state_heat_l2 + latest.op_heat_l2),
+                  static_cast<double>(latest.learning_update_l2), latest.selected_ops,
+                  model.config().num_ops, latest.max_op_selections,
+                  static_cast<double>(latest.op_selection_entropy), task_config.train_samples,
+                  task_config.test_samples, task_config.frames_per_sample,
+                  task_config.idle_frames_between_samples, task_config.window_size,
+                  static_cast<double>(task_config.learning_rate),
                   static_cast<double>(task_config.rejection_scale),
                   static_cast<double>(task_config.rejection_threshold));
 
@@ -151,6 +185,8 @@ void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const TaskConfi
     draw_text(renderer, 16, "train", right - 140.0F, top + 12.0F, SDL_Color{90, 210, 245, 255});
     draw_text(renderer, 16, "test", right - 140.0F, top + 36.0F, SDL_Color{245, 185, 80, 255});
     draw_text(renderer, 16, "self", right - 140.0F, top + 60.0F, SDL_Color{145, 235, 135, 255});
+    draw_text(renderer, 16, "heat", right - 140.0F, top + 84.0F, SDL_Color{245, 95, 95, 255});
+    draw_text(renderer, 16, "learn", right - 140.0F, top + 108.0F, SDL_Color{185, 145, 255, 255});
 }
 
 } // namespace

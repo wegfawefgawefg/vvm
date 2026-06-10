@@ -65,7 +65,16 @@ struct LossPoint {
     float self_loss = 0.0F;
     float test_loss = 0.0F;
     float test_accuracy = 0.0F;
+    float state_heat_l2 = 0.0F;
+    float op_heat_l2 = 0.0F;
+    float learning_update_l2 = 0.0F;
+    float op_selection_entropy = 0.0F;
     std::size_t accuracy_samples = 0;
+    std::size_t updated_ops = 0;
+    std::size_t selected_ops = 0;
+    std::size_t total_selections = 0;
+    std::size_t max_op_selections = 0;
+    std::vector<std::size_t> op_selection_counts;
 };
 
 [[nodiscard]] TaskDataset make_task_dataset(const Config& model_config,

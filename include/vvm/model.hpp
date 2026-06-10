@@ -67,6 +67,8 @@ struct Tick {
     RewardSignal reward;
     float state_heat_stddev = 0.0F;
     float op_heat_stddev = 0.0F;
+    float state_heat_l2 = 0.0F;
+    float op_heat_l2 = 0.0F;
 };
 
 struct StepTrace {
@@ -77,6 +79,8 @@ struct StepTrace {
     float curiosity_reward = 0.0F;
     float state_heat_stddev = 0.0F;
     float op_heat_stddev = 0.0F;
+    float state_heat_l2 = 0.0F;
+    float op_heat_l2 = 0.0F;
 };
 
 struct RunResult {
@@ -96,6 +100,7 @@ struct TrainConfig {
 struct TrainResult {
     float loss = 0.0F;
     float mean_prediction_error = 0.0F;
+    float learning_update_l2 = 0.0F;
     std::size_t tick_count = 0;
     std::size_t updated_ops = 0;
 };
@@ -145,7 +150,7 @@ class Model {
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state) const;
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state,
                                                         std::mt19937& rng) const;
-    void heat_op_bank(float stddev, std::mt19937& rng);
+    [[nodiscard]] float heat_op_bank(float stddev, std::mt19937& rng);
     void normalize_op(std::size_t op);
 
     Config config_;

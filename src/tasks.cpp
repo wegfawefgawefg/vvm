@@ -349,6 +349,44 @@ int predicted_class(std::span<const float> state, int class_count, std::size_t c
     return best;
 }
 
+void record_tick_diagnostics(const Tick& tick, LossPoint& loss) {
+    loss.state_heat_l2 += tick.state_heat_l2;
+    loss.op_heat_l2 += tick.op_heat_l2;
+    if (tick.chosen_op < loss.op_selection_counts.size()) {
+        ++loss.op_selection_counts[tick.chosen_op];
+        ++loss.total_selections;
+    }
+}
+
+void record_train_result(const TrainResult& result, LossPoint& loss) {
+    loss.learning_update_l2 += result.learning_update_l2;
+    loss.updated_ops += result.updated_ops;
+}
+
+void finalize_op_usage(LossPoint& loss) {
+    std::size_t selected_ops = 0;
+    std::size_t max_op_selections = 0;
+    float entropy = 0.0F;
+    if (loss.total_selections > 0U) {
+        for (const std::size_t count : loss.op_selection_counts) {
+            if (count == 0U) {
+                continue;
+            }
+            ++selected_ops;
+            max_op_selections = std::max(max_op_selections, count);
+            const float p = static_cast<float>(count) / static_cast<float>(loss.total_selections);
+            entropy -= p * std::log(p);
+        }
+        if (selected_ops > 1U) {
+            entropy /= std::log(static_cast<float>(loss.op_selection_counts.size()));
+        }
+    }
+
+    loss.selected_ops = selected_ops;
+    loss.max_op_selections = max_op_selections;
+    loss.op_selection_entropy = entropy;
+}
+
 } // namespace
 
 std::vector<float> neutral_state(std::size_t state_dim) {
@@ -463,11 +501,12 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                            std::size_t epoch) {
     if (train_samples.empty()) {
         const EvalMetrics metrics = evaluate_task_metrics(model, test_samples, task_config);
-        return LossPoint{
-            .test_loss = metrics.loss,
-            .test_accuracy = metrics.accuracy,
-            .accuracy_samples = metrics.accuracy_samples,
-        };
+        LossPoint loss{};
+        loss.test_loss = metrics.loss;
+        loss.test_accuracy = metrics.accuracy;
+        loss.accuracy_samples = metrics.accuracy_samples;
+        loss.op_selection_counts.assign(model.config().num_ops, 0U);
+        return loss;
     }
 
     TrainConfig train_config{};
@@ -488,6 +527,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     float self_loss_sum = 0.0F;
     std::size_t trained_ticks = 0;
     std::size_t self_ticks = 0;
+    LossPoint diagnostics{};
+    diagnostics.op_selection_counts.assign(model.config().num_ops, 0U);
 
     for (std::size_t order_index = 0; order_index < order.size(); ++order_index) {
         const TaskSample& sample = train_samples[order[order_index]];
@@ -503,6 +544,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                 frame;
             Tick tick = model.tick(state, rng, clock, sample.input);
             apply_observation(tick, sample.target, model.config().curiosity_scale);
+            record_tick_diagnostics(tick, diagnostics);
 
             train_loss_sum += tick.prediction_error;
             ++trained_ticks;
@@ -512,7 +554,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
             }
             window.push_back(std::move(tick));
 
-            (void)model.train_window(window, train_config);
+            record_train_result(model.train_window(window, train_config), diagnostics);
         }
 
         for (std::size_t frame = 0; frame < task_config.idle_frames_between_samples; ++frame) {
@@ -524,6 +566,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
             if (task_config.task == TaskKind::DelayedCopy) {
                 apply_observation(tick, sample.target, model.config().curiosity_scale);
             }
+            record_tick_diagnostics(tick, diagnostics);
 
             self_loss_sum += tick.prediction_error;
             ++self_ticks;
@@ -533,18 +576,19 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
             }
             window.push_back(std::move(tick));
 
-            (void)model.train_window(window, train_config);
+            record_train_result(model.train_window(window, train_config), diagnostics);
         }
     }
 
     const EvalMetrics metrics = evaluate_task_metrics(model, test_samples, task_config);
-    return LossPoint{
-        .train_loss = train_loss_sum / static_cast<float>(trained_ticks),
-        .self_loss = self_ticks == 0U ? 0.0F : self_loss_sum / static_cast<float>(self_ticks),
-        .test_loss = metrics.loss,
-        .test_accuracy = metrics.accuracy,
-        .accuracy_samples = metrics.accuracy_samples,
-    };
+    diagnostics.train_loss = train_loss_sum / static_cast<float>(trained_ticks);
+    diagnostics.self_loss =
+        self_ticks == 0U ? 0.0F : self_loss_sum / static_cast<float>(self_ticks);
+    diagnostics.test_loss = metrics.loss;
+    diagnostics.test_accuracy = metrics.accuracy;
+    diagnostics.accuracy_samples = metrics.accuracy_samples;
+    finalize_op_usage(diagnostics);
+    return diagnostics;
 }
 
 } // namespace vvm

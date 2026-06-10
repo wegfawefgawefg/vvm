@@ -184,6 +184,17 @@ The candidate set exists for local stochasticity and exploration. It is also the
 small policy surface for future actor-style learning. Unchosen candidates do not
 receive learning credit from that tick.
 
+Each training epoch records per-op selection counts:
+
+```text
+selected_ops       number of ops selected at least once
+max_op_select      highest selection count for any one op
+op_entropy         normalized entropy of the selection distribution
+```
+
+This catches collapse into a small loop where a few ops monopolize execution
+while most of the op bank is ignored.
+
 ## Sampling Policy
 
 The first sampler uses cheap score-derived weights, not softmax:
@@ -225,6 +236,18 @@ Both are followed by normalization.
 The main risk is permanent noise becoming permanent curiosity. The first
 implementation reports this; later training should subtract expected heat noise
 or reward prediction progress instead of raw error.
+
+Training diagnostics track heat pressure explicitly:
+
+```text
+state_heat_l2  L2 norm of state heat noise added during the epoch
+op_heat_l2     L2 norm of op-bank heat noise added during the epoch
+learn_l2       L2 norm of actual op-bank changes from learning updates
+```
+
+If heat is comparable to or larger than learning updates for long runs, the
+machine may be rattling more than learning. The SDL training view overlays heat
+and learning magnitudes so this can be watched over time.
 
 ## Prediction And Curiosity
 
