@@ -66,7 +66,7 @@ int run_visualizer(const Config& config) {
         throw_sdl_error("SDL_CreateWindowAndRenderer failed");
     }
 
-    const Model model(config);
+    Model model(config);
     const std::vector<float> initial_state = model.seeded_state();
     const RunResult result = model.run(initial_state);
 

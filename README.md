@@ -35,6 +35,7 @@ cmake --build --preset dev-sdl3
 ```sh
 ./build/vvm smoke
 ./build/vvm run --steps 8 --state-dim 256 --ops 1024 --top-k 8 --update-scale 1.0
+./build/vvm run --steps 8 --state-heat 0.01 --op-heat 0.001 --heat-decay 0.999
 ./build-sdl3/vvm visualize --steps 256
 ```
 
@@ -49,3 +50,5 @@ and SDL3.
 - `src/visualizer_sdl3.cpp`: SDL3 inspection path.
 - `tests/`: deterministic core smoke tests.
 - `docs/vvm-seed-spec.md`: seed architecture notes.
+- `docs/continuous-vvm.md`: continuous-clock, curiosity, heat, and RL notes.
+- `resources/`: local research references.

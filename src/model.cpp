@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numeric>
 #include <random>
 #include <stdexcept>
 
@@ -28,6 +27,24 @@ void normalize_l2(std::span<float> state) {
     const float inv_std = 1.0F / norm;
     for (float& value : state) {
         value *= inv_std;
+    }
+}
+
+float decayed(float value, float decay, std::size_t clock) {
+    if (value <= 0.0F) {
+        return 0.0F;
+    }
+    return value * std::pow(decay, static_cast<float>(clock));
+}
+
+void apply_heat(std::span<float> values, float stddev, std::mt19937& rng) {
+    if (stddev <= 0.0F) {
+        return;
+    }
+
+    std::normal_distribution<float> noise(0.0F, stddev);
+    for (float& value : values) {
+        value += noise(rng);
     }
 }
 
@@ -57,6 +74,21 @@ Model::Model(Config config) : config_(config) {
     if (config_.update_scale < 0.0F) {
         throw std::invalid_argument("update_scale must be nonnegative");
     }
+    if (config_.input_scale < 0.0F) {
+        throw std::invalid_argument("input_scale must be nonnegative");
+    }
+    if (config_.state_heat_stddev < 0.0F) {
+        throw std::invalid_argument("state_heat_stddev must be nonnegative");
+    }
+    if (config_.op_heat_stddev < 0.0F) {
+        throw std::invalid_argument("op_heat_stddev must be nonnegative");
+    }
+    if (config_.heat_decay < 0.0F || config_.heat_decay > 1.0F) {
+        throw std::invalid_argument("heat_decay must be in [0, 1]");
+    }
+    if (config_.curiosity_scale < 0.0F) {
+        throw std::invalid_argument("curiosity_scale must be nonnegative");
+    }
 
     std::mt19937 rng(config_.seed);
     std::normal_distribution<float> init(0.0F, 0.02F);
@@ -83,6 +115,37 @@ std::vector<float> Model::seeded_state(float scale) const {
     }
     normalize_l2(state);
     return state;
+}
+
+std::vector<float> Model::predict_next(std::span<const float> state,
+                                       std::span<const float> input) const {
+    if (state.size() != config_.state_dim) {
+        throw std::invalid_argument("state size does not match model state_dim");
+    }
+    if (!input.empty() && input.size() != config_.state_dim) {
+        throw std::invalid_argument("input size must match model state_dim");
+    }
+
+    std::vector<float> working_state(state.begin(), state.end());
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        working_state[i] += config_.input_scale * input[i];
+    }
+    normalize_l2(working_state);
+
+    return predict_from_working_state(working_state).state;
+}
+
+float Model::prediction_error(std::span<const float> predicted, std::span<const float> observed) {
+    if (predicted.size() != observed.size()) {
+        throw std::invalid_argument("prediction_error requires equal vector sizes");
+    }
+
+    float sum = 0.0F;
+    for (std::size_t i = 0; i < predicted.size(); ++i) {
+        const float error = observed[i] - predicted[i];
+        sum += error * error;
+    }
+    return sum / static_cast<float>(predicted.size());
 }
 
 Retrieval Model::retrieve(std::span<const float> state) const {
@@ -114,9 +177,8 @@ Retrieval Model::retrieve(std::span<const float> state) const {
     return retrieval;
 }
 
-StepTrace Model::step(std::vector<float>& state) const {
-    Retrieval retrieval = retrieve(state);
-
+Model::Prediction Model::predict_from_working_state(std::span<const float> working_state) const {
+    Retrieval retrieval = retrieve(working_state);
     std::vector<float> mixed_op(config_.state_dim, 0.0F);
     for (std::size_t rank = 0; rank < retrieval.indices.size(); ++rank) {
         const std::size_t op = retrieval.indices[rank];
@@ -129,32 +191,82 @@ StepTrace Model::step(std::vector<float>& state) const {
         }
     }
 
+    std::vector<float> predicted_state(working_state.begin(), working_state.end());
     float activation_sum = 0.0F;
     for (std::size_t i = 0; i < config_.state_dim; ++i) {
-        state[i] = std::max(0.0F, state[i] + (config_.update_scale * mixed_op[i]));
-        activation_sum += state[i];
+        predicted_state[i] =
+            std::max(0.0F, predicted_state[i] + (config_.update_scale * mixed_op[i]));
+        activation_sum += predicted_state[i];
     }
+    normalize_l2(predicted_state);
 
-    normalize_l2(state);
-
-    return StepTrace{
+    return Prediction{
+        .state = std::move(predicted_state),
         .retrieval = std::move(retrieval),
-        .state_norm = l2_norm(state),
         .activation_mean = activation_sum / static_cast<float>(config_.state_dim),
     };
 }
 
-RunResult Model::run(std::span<const float> initial_state) const {
+StepTrace Model::step(std::vector<float>& state, std::mt19937& rng, std::size_t clock,
+                      std::span<const float> input) {
+    if (!input.empty() && input.size() != config_.state_dim) {
+        throw std::invalid_argument("input size must match model state_dim");
+    }
+
+    const float op_heat = decayed(config_.op_heat_stddev, config_.heat_decay, clock);
+    heat_op_bank(op_heat, rng);
+
+    std::vector<float> working_state(state.begin(), state.end());
+    for (std::size_t i = 0; i < input.size(); ++i) {
+        working_state[i] += config_.input_scale * input[i];
+    }
+    normalize_l2(working_state);
+
+    Prediction prediction = predict_from_working_state(working_state);
+    state = prediction.state;
+
+    const float state_heat = decayed(config_.state_heat_stddev, config_.heat_decay, clock);
+    apply_heat(state, state_heat, rng);
+    normalize_l2(state);
+
+    const float error = prediction_error(prediction.state, state);
+
+    return StepTrace{
+        .retrieval = std::move(prediction.retrieval),
+        .state_norm = l2_norm(state),
+        .activation_mean = prediction.activation_mean,
+        .prediction_error = error,
+        .curiosity_reward = config_.curiosity_scale * error,
+        .state_heat_stddev = state_heat,
+        .op_heat_stddev = op_heat,
+    };
+}
+
+void Model::heat_op_bank(float stddev, std::mt19937& rng) {
+    if (stddev <= 0.0F) {
+        return;
+    }
+
+    apply_heat(op_bank_, stddev, rng);
+    for (std::size_t op = 0; op < config_.num_ops; ++op) {
+        std::span<float> op_vector(op_bank_.data() + (op * config_.state_dim), config_.state_dim);
+        normalize_l2(op_vector);
+    }
+}
+
+RunResult Model::run(std::span<const float> initial_state) {
     std::vector<float> state(initial_state.begin(), initial_state.end());
     if (state.size() != config_.state_dim) {
         throw std::invalid_argument("initial state size does not match model state_dim");
     }
 
+    std::mt19937 rng(config_.seed ^ 0xA341316CU);
+
     RunResult result{};
     result.trace.reserve(config_.steps);
 
     for (std::size_t step_index = 0; step_index < config_.steps; ++step_index) {
-        result.trace.push_back(step(state));
+        result.trace.push_back(step(state, rng, step_index));
     }
 
     result.state = std::move(state);

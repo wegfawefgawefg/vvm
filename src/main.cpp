@@ -19,9 +19,9 @@ void print_usage() {
     std::cout << "usage:\n"
               << "  vvm smoke\n"
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--top-k N] "
-                 "[--update-scale F]\n"
+                 "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--top-k N] "
-                 "[--update-scale F]\n";
+                 "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n";
 }
 
 bool parse_size(std::string_view value, std::size_t& out) {
@@ -67,6 +67,26 @@ bool parse_config(std::span<char*> args, vvm::Config& config) {
             if (!parse_float(value, config.update_scale)) {
                 return false;
             }
+        } else if (arg == "--input-scale") {
+            if (!parse_float(value, config.input_scale)) {
+                return false;
+            }
+        } else if (arg == "--state-heat") {
+            if (!parse_float(value, config.state_heat_stddev)) {
+                return false;
+            }
+        } else if (arg == "--op-heat") {
+            if (!parse_float(value, config.op_heat_stddev)) {
+                return false;
+            }
+        } else if (arg == "--heat-decay") {
+            if (!parse_float(value, config.heat_decay)) {
+                return false;
+            }
+        } else if (arg == "--curiosity-scale") {
+            if (!parse_float(value, config.curiosity_scale)) {
+                return false;
+            }
         } else {
             std::cerr << "unknown option: " << arg << '\n';
             return false;
@@ -77,7 +97,7 @@ bool parse_config(std::span<char*> args, vvm::Config& config) {
 }
 
 int run_headless(const vvm::Config& config) {
-    const vvm::Model model(config);
+    vvm::Model model(config);
     const std::vector<float> initial_state = model.seeded_state();
     const vvm::RunResult result = model.run(initial_state);
 
@@ -89,6 +109,8 @@ int run_headless(const vvm::Config& config) {
         std::cout << "step " << i << " max_score=" << trace.retrieval.max_score
                   << " state_norm=" << trace.state_norm
                   << " activation_mean=" << trace.activation_mean
+                  << " prediction_error=" << trace.prediction_error
+                  << " curiosity_reward=" << trace.curiosity_reward
                   << " top_op=" << trace.retrieval.indices.front() << '\n';
     }
     return 0;
