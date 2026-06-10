@@ -5,7 +5,7 @@ Seed repo for a C++ Vector Virtual Machine experiment.
 The first target is a tiny VVM core:
 
 ```text
-state -> nearest ops -> gated residual update -> next state
+state -> dot ops -> top-k op mix -> mul-add -> ReLU -> normalize -> next state
 ```
 
 There is no separate program counter, no key/value memory split, and no runtime
@@ -34,7 +34,7 @@ cmake --build --preset dev-sdl3
 
 ```sh
 ./build/vvm smoke
-./build/vvm run --steps 8 --state-dim 256 --ops 1024 --top-k 8
+./build/vvm run --steps 8 --state-dim 256 --ops 1024 --top-k 8 --update-scale 1.0
 ./build-sdl3/vvm visualize --steps 256
 ```
 

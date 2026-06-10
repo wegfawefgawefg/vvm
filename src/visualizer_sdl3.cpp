@@ -29,7 +29,7 @@ void draw_trace(SDL_Renderer* renderer, const RunResult& result, int width, int 
     for (int i = 0; i < steps; ++i) {
         const StepTrace& trace = result.trace[static_cast<std::size_t>(i)];
         const float score = std::clamp((trace.retrieval.max_score + 1.0F) * 0.5F, 0.0F, 1.0F);
-        const float gate = std::clamp(trace.gate_mean, 0.0F, 1.0F);
+        const float activation = std::clamp(trace.activation_mean, 0.0F, 1.0F);
 
         SDL_FRect score_bar{
             .x = static_cast<float>(i) * cell_width,
@@ -40,14 +40,14 @@ void draw_trace(SDL_Renderer* renderer, const RunResult& result, int width, int 
         SDL_SetRenderDrawColor(renderer, 80, 180, 220, 255);
         SDL_RenderFillRect(renderer, &score_bar);
 
-        SDL_FRect gate_bar{
+        SDL_FRect activation_bar{
             .x = static_cast<float>(i) * cell_width,
-            .y = half_height + (half_height * (1.0F - gate)),
+            .y = half_height + (half_height * (1.0F - activation)),
             .w = std::max(1.0F, cell_width - 1.0F),
-            .h = half_height * gate,
+            .h = half_height * activation,
         };
         SDL_SetRenderDrawColor(renderer, 230, 160, 70, 255);
-        SDL_RenderFillRect(renderer, &gate_bar);
+        SDL_RenderFillRect(renderer, &activation_bar);
     }
 }
 

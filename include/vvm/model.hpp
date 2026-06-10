@@ -12,7 +12,7 @@ struct Config {
     std::size_t num_ops = 1024;
     std::size_t top_k = 8;
     std::size_t steps = 8;
-    float temperature = 1.0F;
+    float update_scale = 1.0F;
     std::uint32_t seed = 0xC0FFEEU;
 };
 
@@ -25,7 +25,7 @@ struct Retrieval {
 struct StepTrace {
     Retrieval retrieval;
     float state_norm = 0.0F;
-    float gate_mean = 0.0F;
+    float activation_mean = 0.0F;
 };
 
 struct RunResult {
@@ -54,11 +54,9 @@ class Model {
 
     Config config_;
     std::vector<float> op_bank_;
-    std::vector<float> gate_weights_;
-    std::vector<float> delta_weights_;
 };
 
 [[nodiscard]] float l2_norm(std::span<const float> values);
-[[nodiscard]] float cosine_similarity(std::span<const float> a, std::span<const float> b);
+[[nodiscard]] float dot_product(std::span<const float> a, std::span<const float> b);
 
 } // namespace vvm

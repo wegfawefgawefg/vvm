@@ -18,8 +18,10 @@ namespace {
 void print_usage() {
     std::cout << "usage:\n"
               << "  vvm smoke\n"
-              << "  vvm run [--steps N] [--state-dim N] [--ops N] [--top-k N] [--temperature F]\n"
-              << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--top-k N]\n";
+              << "  vvm run [--steps N] [--state-dim N] [--ops N] [--top-k N] "
+                 "[--update-scale F]\n"
+              << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--top-k N] "
+                 "[--update-scale F]\n";
 }
 
 bool parse_size(std::string_view value, std::size_t& out) {
@@ -61,8 +63,8 @@ bool parse_config(std::span<char*> args, vvm::Config& config) {
             if (!parse_size(value, config.top_k)) {
                 return false;
             }
-        } else if (arg == "--temperature") {
-            if (!parse_float(value, config.temperature)) {
+        } else if (arg == "--update-scale") {
+            if (!parse_float(value, config.update_scale)) {
                 return false;
             }
         } else {
@@ -85,7 +87,8 @@ int run_headless(const vvm::Config& config) {
     for (std::size_t i = 0; i < result.trace.size(); ++i) {
         const vvm::StepTrace& trace = result.trace[i];
         std::cout << "step " << i << " max_score=" << trace.retrieval.max_score
-                  << " state_norm=" << trace.state_norm << " gate_mean=" << trace.gate_mean
+                  << " state_norm=" << trace.state_norm
+                  << " activation_mean=" << trace.activation_mean
                   << " top_op=" << trace.retrieval.indices.front() << '\n';
     }
     return 0;

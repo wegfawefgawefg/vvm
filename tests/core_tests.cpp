@@ -7,13 +7,13 @@
 
 namespace {
 
-void test_cosine_similarity() {
+void test_dot_product() {
     const float a_values[] = {1.0F, 0.0F};
     const float b_values[] = {0.0F, 1.0F};
     const float c_values[] = {2.0F, 0.0F};
 
-    assert(std::fabs(vvm::cosine_similarity(a_values, b_values)) < 1.0e-6F);
-    assert(std::fabs(vvm::cosine_similarity(a_values, c_values) - 1.0F) < 1.0e-6F);
+    assert(std::fabs(vvm::dot_product(a_values, b_values)) < 1.0e-6F);
+    assert(std::fabs(vvm::dot_product(a_values, c_values) - 2.0F) < 1.0e-6F);
 }
 
 void test_run_shape() {
@@ -34,8 +34,7 @@ void test_run_shape() {
         assert(trace.retrieval.indices.size() == config.top_k);
         assert(trace.retrieval.weights.size() == config.top_k);
         assert(trace.state_norm > 0.0F);
-        assert(trace.gate_mean > 0.0F);
-        assert(trace.gate_mean < 1.0F);
+        assert(trace.activation_mean >= 0.0F);
     }
 }
 
@@ -57,7 +56,7 @@ void test_invalid_config() {
 } // namespace
 
 int main() {
-    test_cosine_similarity();
+    test_dot_product();
     test_run_shape();
     test_invalid_config();
 

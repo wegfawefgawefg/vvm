@@ -3,7 +3,8 @@
 The initial machine is:
 
 ```text
-S(t + 1) = F(S(t), Retrieve(S(t), OpBank))
+R(t) = average(top_k(dot(S(t), OpBank)))
+S(t + 1) = normalize(ReLU(S(t) + update_scale * R(t)))
 ```
 
 ## V0 Constraints
@@ -11,7 +12,7 @@ S(t + 1) = F(S(t), Retrieve(S(t), OpBank))
 - One state vector.
 - One fixed-size trainable op table.
 - State queries nearest ops directly.
-- Retrieved ops update state through a shared transition.
+- Retrieved ops update state through a fused multiply-add and ReLU.
 - Classification/readout happens from the final state later.
 - No separate program counter.
 - No separate key/value memory.
@@ -28,7 +29,7 @@ state_dim = 256
 num_ops = 1024
 top_k = 8
 steps = 8
-temperature = 1.0
+update_scale = 1.0
 optimizer = AdamW
 lr = 1e-3
 batch_size = 128
@@ -42,7 +43,7 @@ batch_size = 128
 - number of ops used per epoch
 - mean max retrieval score
 - state norm mean/std
-- gate mean/std
+- activation mean/std
 - accuracy vs steps
 - accuracy vs top-k
 
