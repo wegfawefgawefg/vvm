@@ -46,7 +46,8 @@ void print_usage() {
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
-                 "[--idle-frames N] [--window N] [--class-start-frame N] [--lr F] [--lr-decay F] "
+                 "[--idle-frames N] [--window N] [--train-interval N] "
+                 "[--class-start-frame N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F] [--bptt]\n"
@@ -306,6 +307,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--window") {
             if (!parse_size(value, task_config.window_size)) {
+                return false;
+            }
+        } else if (arg == "--train-interval") {
+            if (!parse_size(value, task_config.train_interval)) {
                 return false;
             }
         } else if (arg == "--class-start-frame") {
@@ -631,6 +636,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
               << " window=" << task_config.window_size
+              << " train_interval=" << task_config.train_interval
               << " class_start_frame=" << task_config.class_start_frame
               << " lr=" << task_config.learning_rate
               << " lr_decay=" << task_config.learning_rate_decay

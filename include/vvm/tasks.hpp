@@ -48,6 +48,7 @@ struct TaskConfig {
     std::size_t frames_per_sample = 8;
     std::size_t idle_frames_between_samples = 0;
     std::size_t window_size = 8;
+    std::size_t train_interval = 1;
     std::size_t class_start_frame = 0;
     float learning_rate = 0.05F;
     float learning_rate_decay = 1.0F;

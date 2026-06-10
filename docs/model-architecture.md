@@ -162,6 +162,9 @@ Tuning notes:
   target normalization.
 - `--class-start-frame` delays class-register loss within each shown sample
   while keeping reconstruction/world-model pressure active.
+- `--train-interval` controls how often the current recurrent window is trained.
+  The default `1` trains every frame; higher values preserve the window but
+  reduce repeated updates.
 - `--retrieval-temperature 0` uses the default linear top-k sampling weights;
   positive values use score softmax over the top-k set.
 - `--lr-decay` reduces learning rate by epoch.
@@ -217,6 +220,12 @@ retrieval policy tested for this pure base VM.
 Scaling the same setup to 2048 training samples did not fix convergence. It
 peaked lower, around `77.5%` balanced accuracy, and then drifted toward a class
 bias. That points at route/update stability rather than simple data starvation.
+
+Training-cadence sweeps show that the repeated-window update is not merely a
+hidden bug. `--train-interval 2`, `4`, or `8` with the original learning rate
+undertrains. Scaling learning rate roughly with the interval recovers the same
+`80-81%` ceiling, but does not break it. The per-frame replay is acting like a
+useful structured update-strength schedule.
 
 The gradient path now has a finite-difference direction test for weighted
 targets, including op-row renormalization. That test passed, so the current

@@ -100,13 +100,16 @@ retrieval sampling diagnostics: `mean_rank`, `mean_prob`, and
 `test_class_loss`. `--hard-retrieval` uses the nearest op deterministically
 instead of sampling among top candidates.
 `--class-start-frame`, `--class-value-scale`, `--class-loss-weight`,
-`--retrieval-temperature`, `--lr-decay`, `--momentum`, and `--rejection-decay`
-are tuning knobs for register targets, candidate sampling, and anti-collapse
-pressure. `--class-start-frame` delays class-register loss while still training
-reconstruction from frame 0. `--retrieval-temperature 0` keeps the default
-linear top-k weighting; positive values use softmax over top-k scores.
-`--rejection-overuse-scale` makes rejection focus on ops that are over-selected
-relative to the current epoch's usage distribution.
+`--train-interval`, `--retrieval-temperature`, `--lr-decay`, `--momentum`, and
+`--rejection-decay` are tuning knobs for register targets, training cadence,
+candidate sampling, and anti-collapse pressure. `--class-start-frame` delays
+class-register loss while still training reconstruction from frame 0.
+`--train-interval 1` trains the current recurrent window every frame; larger
+values train less often while preserving the same window.
+`--retrieval-temperature 0` keeps the default linear top-k weighting; positive
+values use softmax over top-k scores. `--rejection-overuse-scale` makes
+rejection focus on ops that are over-selected relative to the current epoch's
+usage distribution.
 
 ## Layout
 

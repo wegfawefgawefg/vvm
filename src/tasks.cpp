@@ -701,6 +701,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.window_size == 0U) {
         throw std::invalid_argument("window_size must be nonzero");
     }
+    if (task_config.train_interval == 0U) {
+        throw std::invalid_argument("train_interval must be nonzero");
+    }
     if (task_config.class_start_frame > task_config.frames_per_sample) {
         throw std::invalid_argument("class_start_frame must be <= frames_per_sample");
     }
@@ -974,6 +977,16 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         std::vector<float> state = neutral_state(model.config().state_dim);
         std::vector<Tick> window;
         window.reserve(task_config.window_size);
+        std::size_t sample_ticks = 0;
+        auto train_current_window = [&](bool force) {
+            if (window.empty()) {
+                return;
+            }
+            if (!force && sample_ticks % task_config.train_interval != 0U) {
+                return;
+            }
+            record_train_result(model.train_window(window, train_config), diagnostics);
+        };
 
         for (std::size_t frame = 0; frame < task_config.frames_per_sample; ++frame) {
             const std::size_t clock =
@@ -993,8 +1006,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                 window.erase(window.begin());
             }
             window.push_back(std::move(tick));
-
-            record_train_result(model.train_window(window, train_config), diagnostics);
+            ++sample_ticks;
+            train_current_window(false);
         }
 
         for (std::size_t frame = 0; frame < task_config.idle_frames_between_samples; ++frame) {
@@ -1016,8 +1029,11 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                 window.erase(window.begin());
             }
             window.push_back(std::move(tick));
-
-            record_train_result(model.train_window(window, train_config), diagnostics);
+            ++sample_ticks;
+            train_current_window(false);
+        }
+        if (sample_ticks % task_config.train_interval != 0U) {
+            train_current_window(true);
         }
     }
 

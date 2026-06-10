@@ -262,6 +262,11 @@ Larger-data sweep: the same 256-op setup with 2048 train samples peaked around
 `77.5%` balanced accuracy and then drifted toward class bias. More samples alone
 do not fix the current route stability problem.
 
+Training-cadence sweep: `--train-interval 2`, `4`, and `8` undertrain at the
+original learning rate. Raising learning rate in proportion to the interval
+recovers the same `80-81%` ceiling, so the current every-frame window replay is
+not the obvious convergence bug.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:
