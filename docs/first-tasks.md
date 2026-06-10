@@ -178,20 +178,21 @@ Current repo support:
 
 ```sh
 ./scripts/fetch_mnist.sh
-./build/vvm train-task --task mnist --state-dim 784 --ops 2048 --candidates 8 \
+./build/vvm train-task --task mnist --state-dim 794 --ops 2048 --candidates 8 \
   --train-samples 512 --test-samples 128 --sample-frames 8 --window 8 \
   --epochs 10 --lr 0.05
 ```
 
 This first version is VVM-native rather than a standard classifier head: the
-image is embedded into state, and the target digit is encoded as a full-state
-class prototype. Exact `test_accuracy` is reported by matching those prototypes.
+image is embedded into `state[0..783]`, and the target both reconstructs that
+image region and writes the label into digit registers at `state[784..793]`.
+Exact `test_accuracy` is reported from those registers.
 
-Early result: the loader/training path works, but no-socket MNIST stays near
-random accuracy. The likely issue is not IDX parsing; it is that an image query
-and digit target are dissimilar, so a homogeneous op vector has to act as both
-image-address key and digit-update value. Next probe should preserve image state
-and add digit registers, or add the first output socket/readout.
+Early result: the loader/training path works, but pure label-prototype MNIST
+stayed near random accuracy. That version made the image query and digit target
+too dissimilar. The current probe preserves image state and adds digit
+registers so the core gets both sample reconstruction and class determination
+pressure.
 
 ### 8. CartPole Observation Prediction
 

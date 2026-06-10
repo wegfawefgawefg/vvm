@@ -103,11 +103,18 @@ vector, moving the op toward the digit target can move it away from the image
 queries that should retrieve it later. That is the key/value conflict we wanted
 to postpone in v0.
 
-Possible next probes before adding a learned connector:
+Current MNIST probe before adding a learned connector:
 
-- preserve the image in the target state and add digit registers instead of
-  replacing the whole state with a label prototype
-- reserve explicit state slots for output registers, then decode those slots
+```text
+state[0..783]    image reconstruction region
+state[784..793]  digit registers
+```
+
+This asks the same state to retain the sample and determine its class. It gives
+the op bank more information from the data than a label-only target.
+
+Further probes:
+
 - keep homogeneous ops but add a small readout socket to ask whether class
   information is already present in state
 - later, test key/value split only if homogeneous ops cannot handle these probes

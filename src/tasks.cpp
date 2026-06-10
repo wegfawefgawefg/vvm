@@ -161,8 +161,11 @@ std::ifstream open_binary(const std::filesystem::path& path) {
 
 TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigned char label,
                              std::size_t state_dim, VectorRange range) {
-    if (state_dim < 784U) {
-        throw std::invalid_argument("mnist task requires state_dim >= 784");
+    constexpr std::size_t kImageDims = 784;
+    constexpr std::size_t kDigitOffset = 784;
+    constexpr std::size_t kDigitClasses = 10;
+    if (state_dim < kImageDims + kDigitClasses) {
+        throw std::invalid_argument("mnist task requires state_dim >= 794");
     }
 
     std::vector<float> input(state_dim, 0.0F);
@@ -171,11 +174,25 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
     }
     normalize_l2(input);
 
+    std::vector<float> target(state_dim, 0.0F);
+    constexpr float kImageWeight = 1.0F;
+    constexpr float kClassWeight = 2.0F;
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+        target[i] = kImageWeight * input[i];
+    }
+    const std::vector<float> digit = class_vector(kDigitClasses, static_cast<int>(label),
+                                                  static_cast<int>(kDigitClasses), range);
+    for (std::size_t i = 0; i < digit.size(); ++i) {
+        target[kDigitOffset + i] = kClassWeight * digit[i];
+    }
+    normalize_l2(target);
+
     return TaskSample{
         .input = std::move(input),
-        .target = class_vector(state_dim, static_cast<int>(label), 10, range),
+        .target = std::move(target),
         .label = static_cast<int>(label),
-        .class_count = 10,
+        .class_count = static_cast<int>(kDigitClasses),
+        .class_offset = kDigitOffset,
     };
 }
 
@@ -279,8 +296,8 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
 }
 
 TaskDataset make_mnist_dataset(const Config& model_config, const TaskConfig& task_config) {
-    if (model_config.state_dim < 784U) {
-        throw std::invalid_argument("mnist task requires --state-dim 784 or larger");
+    if (model_config.state_dim < 794U) {
+        throw std::invalid_argument("mnist task requires --state-dim 794 or larger");
     }
 
     const std::filesystem::path root(task_config.mnist_dir);
@@ -303,8 +320,9 @@ void validate_sample(const TaskSample& sample, std::size_t state_dim) {
     }
 }
 
-int predicted_class(std::span<const float> state, int class_count, VectorRange range) {
-    if (class_count <= 0 || static_cast<std::size_t>(class_count) > state.size()) {
+int predicted_class(std::span<const float> state, int class_count, std::size_t class_offset,
+                    VectorRange range) {
+    if (class_count <= 0 || class_offset + static_cast<std::size_t>(class_count) > state.size()) {
         throw std::invalid_argument("invalid class count");
     }
 
@@ -312,15 +330,15 @@ int predicted_class(std::span<const float> state, int class_count, VectorRange r
     float best_score = -std::numeric_limits<float>::infinity();
     for (int candidate = 0; candidate < class_count; ++candidate) {
         float score = 0.0F;
-        for (std::size_t i = 0; i < state.size(); ++i) {
-            const bool matches =
-                static_cast<int>(i % static_cast<std::size_t>(class_count)) == candidate;
+        for (int i = 0; i < class_count; ++i) {
+            const bool matches = i == candidate;
+            const float value = state[class_offset + static_cast<std::size_t>(i)];
             if (range == VectorRange::Signed) {
                 const float off_value =
                     class_count <= 2 ? -1.0F : -2.0F / static_cast<float>(class_count - 2);
-                score += state[i] * (matches ? 1.0F : off_value);
+                score += value * (matches ? 1.0F : off_value);
             } else if (matches) {
-                score += state[i];
+                score += value;
             }
         }
         if (score > best_score) {
@@ -419,8 +437,8 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
 
         loss_sum += Model::prediction_error(state, samples[i].target);
         if (samples[i].label >= 0 && samples[i].class_count > 0) {
-            correct += predicted_class(state, samples[i].class_count, task_config.vector_range) ==
-                               samples[i].label
+            correct += predicted_class(state, samples[i].class_count, samples[i].class_offset,
+                                       task_config.vector_range) == samples[i].label
                            ? 1U
                            : 0U;
             ++accuracy_samples;

@@ -29,6 +29,7 @@ struct TaskSample {
     std::vector<float> target;
     int label = -1;
     int class_count = 0;
+    std::size_t class_offset = 0;
 };
 
 struct TaskDataset {
