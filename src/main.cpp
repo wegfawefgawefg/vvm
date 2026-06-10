@@ -7,6 +7,8 @@
 #include <chrono>
 #include <cmath>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <span>
@@ -33,6 +35,7 @@ struct CliOptions {
     std::size_t epochs = 200;
     std::size_t hidden_dim = 64;
     float readout_learning_rate = 0.1F;
+    std::string output_dir = "artifacts/reconstructions";
     ReadoutSource readout_source = ReadoutSource::Input;
     bool restore_best = false;
     bool anchor_to_best = false;
@@ -65,6 +68,8 @@ void print_usage() {
                  "[--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm train-autoencoder [--task mnist-01|mnist] [--hidden N] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
+              << "  vvm export-reconstructions [--output-dir PATH] [--hidden N] "
+                 "[--readout-lr F] [train-task options]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
@@ -313,6 +318,8 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_float(value, cli_options.readout_learning_rate)) {
                 return false;
             }
+        } else if (arg == "--output-dir") {
+            cli_options.output_dir = std::string(value);
         } else if (arg == "--readout-source") {
             if (!parse_readout_source(value, cli_options.readout_source)) {
                 return false;
@@ -1035,6 +1042,186 @@ int run_autoencoder_training(const vvm::Config& config, const vvm::TaskConfig& t
     return 0;
 }
 
+float reconstruction_white_point(const vvm::TaskSample& sample) {
+    const std::size_t image_dims = std::min<std::size_t>(784U, sample.input.size());
+    float white = 0.0F;
+    for (std::size_t i = 0; i < image_dims; ++i) {
+        white = std::max(white, sample.input[i]);
+    }
+    return std::max(white, 1.0e-6F);
+}
+
+unsigned char reconstruction_pixel(float value, float white_point) {
+    const float normalized = std::clamp(value / white_point, 0.0F, 1.0F);
+    return static_cast<unsigned char>(std::lround(normalized * 255.0F));
+}
+
+std::vector<unsigned char> reconstruction_tile(std::span<const float> values, float white_point) {
+    constexpr std::size_t kImageDims = 784;
+    if (values.size() < kImageDims) {
+        throw std::invalid_argument("reconstruction vector must have at least 784 dims");
+    }
+
+    std::vector<unsigned char> tile(kImageDims, 0U);
+    for (std::size_t i = 0; i < kImageDims; ++i) {
+        tile[i] = reconstruction_pixel(values[i], white_point);
+    }
+    return tile;
+}
+
+void write_pgm(const std::filesystem::path& path, std::size_t width, std::size_t height,
+               std::span<const unsigned char> pixels) {
+    if (pixels.size() != width * height) {
+        throw std::invalid_argument("PGM pixel count mismatch");
+    }
+
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        throw std::runtime_error("failed to open " + path.string());
+    }
+    out << "P5\n" << width << ' ' << height << "\n255\n";
+    out.write(reinterpret_cast<const char*>(pixels.data()),
+              static_cast<std::streamsize>(pixels.size()));
+}
+
+void blit_tile(std::vector<unsigned char>& canvas, std::size_t canvas_width, std::size_t x,
+               std::size_t y, std::span<const unsigned char> tile) {
+    constexpr std::size_t kTileSize = 28;
+    if (tile.size() != kTileSize * kTileSize) {
+        throw std::invalid_argument("tile size mismatch");
+    }
+    for (std::size_t row = 0; row < kTileSize; ++row) {
+        for (std::size_t col = 0; col < kTileSize; ++col) {
+            canvas[((y + row) * canvas_width) + x + col] = tile[(row * kTileSize) + col];
+        }
+    }
+}
+
+std::vector<std::size_t>
+select_binary_reconstruction_samples(std::span<const vvm::TaskSample> samples,
+                                     std::size_t per_class) {
+    std::vector<std::size_t> selected;
+    std::size_t zeros = 0;
+    std::size_t ones = 0;
+    for (std::size_t i = 0; i < samples.size() && (zeros < per_class || ones < per_class); ++i) {
+        if (samples[i].label == 0 && zeros < per_class) {
+            selected.push_back(i);
+            ++zeros;
+        } else if (samples[i].label == 1 && ones < per_class) {
+            selected.push_back(i);
+            ++ones;
+        }
+    }
+    if (selected.empty()) {
+        throw std::runtime_error("no labeled samples available for reconstruction export");
+    }
+    return selected;
+}
+
+int run_reconstruction_export(const vvm::Config& config, const vvm::TaskConfig& task_config,
+                              const CliOptions& cli_options) {
+    vvm::Model model(config);
+    const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+
+    vvm::MlpAutoencoder autoencoder(vvm::ReadoutConfig{
+        .input_dim = config.state_dim,
+        .hidden_dim = cli_options.hidden_dim,
+        .learning_rate = cli_options.readout_learning_rate,
+    });
+
+    std::vector<std::size_t> order(dataset.train.size());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        order[i] = i;
+    }
+
+    for (std::size_t epoch = 0; epoch < cli_options.epochs; ++epoch) {
+        std::mt19937 shuffle_rng(task_config.seed ^ static_cast<std::uint32_t>(epoch));
+        std::shuffle(order.begin(), order.end(), shuffle_rng);
+        for (const std::size_t sample_index : order) {
+            const vvm::TaskSample& sample = dataset.train[sample_index];
+            static_cast<void>(autoencoder.train_one(sample.input, sample.input));
+        }
+    }
+
+    float best_balanced_accuracy = -1.0F;
+    std::vector<float> best_bank;
+    const std::vector<float> initial_bank(model.op_bank().begin(), model.op_bank().end());
+    for (std::size_t epoch = 0; epoch < cli_options.epochs; ++epoch) {
+        std::span<const float> op_anchor = {};
+        if (task_config.op_anchor_scale > 0.0F) {
+            if (cli_options.anchor_to_best && !best_bank.empty()) {
+                op_anchor = best_bank;
+            } else if (!cli_options.anchor_to_best) {
+                op_anchor = initial_bank;
+            }
+        }
+        const vvm::LossPoint loss = vvm::train_task_epoch(model, dataset.train, dataset.test,
+                                                          task_config, epoch, op_anchor);
+        if (loss.accuracy_samples > 0U && loss.test_balanced_accuracy > best_balanced_accuracy) {
+            best_balanced_accuracy = loss.test_balanced_accuracy;
+            if (cli_options.restore_best || cli_options.anchor_to_best) {
+                best_bank.assign(model.op_bank().begin(), model.op_bank().end());
+            }
+        }
+    }
+    if (cli_options.restore_best && !best_bank.empty()) {
+        model.replace_op_bank(best_bank);
+    }
+
+    const std::filesystem::path output_root(cli_options.output_dir);
+    std::filesystem::create_directories(output_root);
+    const std::vector<std::size_t> selected =
+        select_binary_reconstruction_samples(dataset.test, 5U);
+
+    constexpr std::size_t kTileSize = 28;
+    constexpr std::size_t kGap = 2;
+    const std::size_t columns = selected.size();
+    const std::size_t rows = 3;
+    const std::size_t canvas_width = (columns * kTileSize) + ((columns - 1U) * kGap);
+    const std::size_t canvas_height = (rows * kTileSize) + ((rows - 1U) * kGap);
+    std::vector<unsigned char> contact(canvas_width * canvas_height, 24U);
+
+    for (std::size_t column = 0; column < selected.size(); ++column) {
+        const vvm::TaskSample& sample = dataset.test[selected[column]];
+        const float white_point = reconstruction_white_point(sample);
+        const std::vector<unsigned char> original = reconstruction_tile(sample.input, white_point);
+        const std::vector<float> autoencoder_output = autoencoder.predict(sample.input);
+        const std::vector<unsigned char> autoencoder_tile =
+            reconstruction_tile(autoencoder_output, white_point);
+
+        std::vector<float> state = vvm::neutral_state(model.config().state_dim);
+        for (std::size_t frame = 0; frame < task_config.frames_per_sample; ++frame) {
+            state = model.predict_next(state, sample.input);
+        }
+        const std::vector<unsigned char> vvm_tile = reconstruction_tile(state, white_point);
+
+        const std::size_t x = column * (kTileSize + kGap);
+        blit_tile(contact, canvas_width, x, 0U, original);
+        blit_tile(contact, canvas_width, x, kTileSize + kGap, autoencoder_tile);
+        blit_tile(contact, canvas_width, x, (2U * (kTileSize + kGap)), vvm_tile);
+
+        const std::string stem =
+            std::to_string(column) + "_label" + std::to_string(sample.label) + ".pgm";
+        write_pgm(output_root / ("original_" + stem), kTileSize, kTileSize, original);
+        write_pgm(output_root / ("autoencoder_" + stem), kTileSize, kTileSize, autoencoder_tile);
+        write_pgm(output_root / ("vvm_" + stem), kTileSize, kTileSize, vvm_tile);
+    }
+
+    write_pgm(output_root / "mnist01_reconstruction_contact.pgm", canvas_width, canvas_height,
+              contact);
+
+    std::cout << "reconstruction_export output_dir=" << output_root
+              << " samples=" << selected.size() << " rows=original,autoencoder,vvm"
+              << " autoencoder_params=" << autoencoder.parameter_count()
+              << " vvm_params=" << model.parameter_count();
+    if (best_balanced_accuracy >= 0.0F) {
+        std::cout << " vvm_best_balanced=" << (100.0F * best_balanced_accuracy) << "%";
+    }
+    std::cout << '\n';
+    return 0;
+}
+
 int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, std::size_t epochs) {
     struct BenchTask {
         vvm::TaskKind task = vvm::TaskKind::CopyInput;
@@ -1141,6 +1328,10 @@ int main(int argc, char** argv) {
 
         if (command == "train-autoencoder") {
             return run_autoencoder_training(config, task_config, cli_options);
+        }
+
+        if (command == "export-reconstructions") {
+            return run_reconstruction_export(config, task_config, cli_options);
         }
 
         if (command == "bench-tasks") {

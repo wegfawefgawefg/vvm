@@ -41,6 +41,7 @@ __pycache__/
 venv/
 
 runs/
+artifacts/
 checkpoints/
 datasets/
 resources/mnist/
