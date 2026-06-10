@@ -187,6 +187,12 @@ This first version is VVM-native rather than a standard classifier head: the
 image is embedded into state, and the target digit is encoded as a full-state
 class prototype. Exact `test_accuracy` is reported by matching those prototypes.
 
+Early result: the loader/training path works, but no-socket MNIST stays near
+random accuracy. The likely issue is not IDX parsing; it is that an image query
+and digit target are dissimilar, so a homogeneous op vector has to act as both
+image-address key and digit-update value. Next probe should preserve image state
+and add digit registers, or add the first output socket/readout.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

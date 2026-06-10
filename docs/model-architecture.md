@@ -41,6 +41,77 @@ The state is normalized after major perturbations. This keeps dot-product
 retrieval meaningful and prevents runaway magnitude from becoming the whole
 addressing scheme.
 
+## Sockets And Connectors
+
+The VVM core should stay small:
+
+```text
+state
+op bank
+retrieval
+tick/update
+```
+
+External interfaces are sockets. A socket is an attachable pathway between the
+world and the VVM state:
+
+```text
+world signal <-> connector <-> state
+```
+
+The connector may be trainable, but it is not the core VM. It is a small adapter
+for a modality or output surface:
+
+```text
+eye connector:      pixels -> state injection
+digit connector:    state -> digit scores
+text connector:     token <-> state
+motor connector:    state -> action registers
+reward connector:   scalar reward -> reward/value signal
+```
+
+This lets us keep the op bank as the shared transition landscape while giving
+each interface a compact way to learn how to write into or read from state.
+Trained connectors can be shared or cloned:
+
+```text
+left camera  -> shared eye connector -> state
+right camera -> shared eye connector -> state
+```
+
+or copied and allowed to specialize.
+
+This does not mean MNIST should require a socket to learn anything. The
+no-socket MNIST task remains a useful probe: can the core op bank itself map an
+image-like state into a class-like state? The socket version is the next cleaner
+experiment because it asks whether class information is readable from state
+without forcing the entire state to become the label.
+
+The first no-socket MNIST run exposed a likely architectural conflict rather
+than a dataset loader bug:
+
+```text
+query: image-like state
+target: label-like state
+op vector: both address key and update value
+```
+
+For copy-style tasks this is fine because the query and target live in nearly
+the same region. For MNIST classification, a useful update would be selected by
+image similarity but move state toward a digit decision. With one homogeneous op
+vector, moving the op toward the digit target can move it away from the image
+queries that should retrieve it later. That is the key/value conflict we wanted
+to postpone in v0.
+
+Possible next probes before adding a learned connector:
+
+- preserve the image in the target state and add digit registers instead of
+  replacing the whole state with a label prototype
+- reserve explicit state slots for output registers, then decode those slots
+- keep homogeneous ops but add a small readout socket to ask whether class
+  information is already present in state
+- later, test key/value split only if homogeneous ops cannot handle these probes
+
 ## Op Bank
 
 ```text

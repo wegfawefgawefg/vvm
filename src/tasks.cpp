@@ -63,9 +63,12 @@ std::vector<float> class_vector(std::size_t size, int label, int class_count, Ve
 
     std::vector<float> values(size, 0.0F);
     if (range == VectorRange::Signed) {
+        const float off_value =
+            class_count <= 2 ? -1.0F : -2.0F / static_cast<float>(class_count - 2);
         for (std::size_t i = 0; i < values.size(); ++i) {
-            values[i] =
-                static_cast<int>(i % static_cast<std::size_t>(class_count)) == label ? 1.0F : -1.0F;
+            values[i] = static_cast<int>(i % static_cast<std::size_t>(class_count)) == label
+                            ? 1.0F
+                            : off_value;
         }
     } else {
         for (std::size_t i = 0; i < values.size(); ++i) {
@@ -313,7 +316,9 @@ int predicted_class(std::span<const float> state, int class_count, VectorRange r
             const bool matches =
                 static_cast<int>(i % static_cast<std::size_t>(class_count)) == candidate;
             if (range == VectorRange::Signed) {
-                score += state[i] * (matches ? 1.0F : -1.0F);
+                const float off_value =
+                    class_count <= 2 ? -1.0F : -2.0F / static_cast<float>(class_count - 2);
+                score += state[i] * (matches ? 1.0F : off_value);
             } else if (matches) {
                 score += state[i];
             }
