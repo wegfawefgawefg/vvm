@@ -176,6 +176,11 @@ Tuning notes:
 - `--train-interval` controls how often the current recurrent window is trained.
   The default `1` trains every frame; higher values preserve the window but
   reduce repeated updates.
+- `--affinity-retain-scale` and `--affinity-retain-threshold` add sparse
+  positive route pressure: when a selected op's prediction error is below the
+  threshold, the op is nudged toward the working state that selected it. This is
+  the mirror of rejection pressure for bad matches. It is diagnostic for route
+  addressability, not a default.
 - `--retrieval-temperature 0` uses the default linear top-k sampling weights;
   positive values use score softmax over the top-k set.
 - `--lr-decay` reduces learning rate by epoch.

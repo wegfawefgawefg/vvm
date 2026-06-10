@@ -316,6 +316,22 @@ pressure via `--class-loss-weight 224`. Immediate class pressure plus best-bank
 anchoring remains the best current schedule, but the ramp confirms that the
 objective timing changes route stability.
 
+Positive route retention is available for diagnostics:
+
+```text
+--affinity-retain-scale F
+--affinity-retain-threshold F
+```
+
+This only updates selected ops. If a selected op's prediction error is below the
+threshold, the gradient nudges that op toward the working state that selected it,
+making the route easier to reselect later. A first `mnist-01` probe with
+`--affinity-retain-scale 0.1 --affinity-retain-threshold 0.025` reduced
+balanced accuracy to about `84.2%` and made op 36 more dominant. So the sign and
+mechanism work, but naive positive affinity makes routes too sticky instead of
+breaking the current ceiling. If this idea is reused, it likely needs underuse or
+margin gating rather than unconditional "good op gets stickier" pressure.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

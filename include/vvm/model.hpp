@@ -101,6 +101,8 @@ struct TrainConfig {
     float rejection_scale = 0.0F;
     float rejection_threshold = 0.02F;
     float rejection_overuse_scale = 0.0F;
+    float affinity_retain_scale = 0.0F;
+    float affinity_retain_threshold = 0.0F;
     std::span<const std::size_t> op_usage_counts = {};
     std::span<const float> op_anchor = {};
     float op_anchor_scale = 0.0F;

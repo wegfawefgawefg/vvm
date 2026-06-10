@@ -495,6 +495,12 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     if (train_config.rejection_overuse_scale < 0.0F) {
         throw std::invalid_argument("rejection_overuse_scale must be nonnegative");
     }
+    if (train_config.affinity_retain_scale < 0.0F) {
+        throw std::invalid_argument("affinity_retain_scale must be nonnegative");
+    }
+    if (train_config.affinity_retain_threshold < 0.0F) {
+        throw std::invalid_argument("affinity_retain_threshold must be nonnegative");
+    }
     if (train_config.op_anchor_scale < 0.0F) {
         throw std::invalid_argument("op_anchor_scale must be nonnegative");
     }
@@ -568,6 +574,22 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         }
     };
 
+    auto add_affinity_retain_gradient = [this, &gradients, &train_config](const Tick& tick,
+                                                                          float recency_weight) {
+        const float retain_margin = train_config.affinity_retain_threshold - tick.prediction_error;
+        if (train_config.affinity_retain_scale <= 0.0F || retain_margin <= 0.0F ||
+            tick.working_state.empty()) {
+            return;
+        }
+
+        const float attraction =
+            recency_weight * train_config.affinity_retain_scale * retain_margin;
+        const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+        for (std::size_t i = 0; i < config_.state_dim; ++i) {
+            gradients[op_offset + i] -= attraction * tick.working_state[i];
+        }
+    };
+
     for (std::size_t tick_index = 0; tick_index < ticks.size(); ++tick_index) {
         const Tick& tick = ticks[tick_index];
         if (tick.predicted_state.size() != config_.state_dim ||
@@ -635,6 +657,7 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
             grad_state_next =
                 normalize_backward(tick.working_state, tick.working_pre_state, grad_working);
             add_rejection_gradient(tick, recency_weight);
+            add_affinity_retain_gradient(tick, recency_weight);
         }
     } else {
         for (std::size_t tick_index = 0; tick_index < ticks.size(); ++tick_index) {
@@ -657,6 +680,7 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
             }
 
             add_rejection_gradient(tick, recency_weight);
+            add_affinity_retain_gradient(tick, recency_weight);
         }
     }
 
