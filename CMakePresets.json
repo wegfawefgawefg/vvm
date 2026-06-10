@@ -1,0 +1,79 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Debug (headless dev)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "NNVM_STRICT": true,
+        "NNVM_WARN_AS_ERROR": true,
+        "NNVM_BUILD_CLI": true,
+        "NNVM_BUILD_TESTS": true,
+        "NNVM_BUILD_VISUALIZER": false,
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "dev-sdl3",
+      "displayName": "Debug (SDL3 visualizer)",
+      "binaryDir": "${sourceDir}/build-sdl3",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "NNVM_STRICT": true,
+        "NNVM_WARN_AS_ERROR": true,
+        "NNVM_BUILD_CLI": true,
+        "NNVM_BUILD_TESTS": true,
+        "NNVM_BUILD_VISUALIZER": true,
+        "NNVM_SDL_DEPS": "auto",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "binaryDir": "${sourceDir}/build-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "NNVM_STRICT": true,
+        "NNVM_WARN_AS_ERROR": true,
+        "NNVM_BUILD_CLI": true,
+        "NNVM_BUILD_TESTS": true,
+        "NNVM_BUILD_VISUALIZER": false,
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "jobs": 0
+    },
+    {
+      "name": "dev-sdl3",
+      "configurePreset": "dev-sdl3",
+      "jobs": 0
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
