@@ -36,16 +36,24 @@ cmake --build --preset dev-sdl3
 ./build/vvm smoke
 ./build/vvm run --steps 8 --state-dim 256 --ops 1024 --candidates 8 --update-scale 1.0
 ./build/vvm run --steps 8 --state-heat 0.01 --op-heat 0.001 --heat-decay 0.999
+./build/vvm train-toy --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1
 ./build-sdl3/vvm visualize --steps 256
+./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1
 ```
 
-`smoke` and `run` are headless. `visualize` requires `VVM_BUILD_VISUALIZER=ON`
-and SDL3.
+`smoke`, `run`, and `train-toy` are headless. `visualize` and
+`visualize-train` require `VVM_BUILD_VISUALIZER=ON` and SDL3.
+
+The first toy task is `copy-input`: a nonnegative input vector is shown for
+`--sample-frames` ticks and the model trains state toward that same vector.
+When `--idle-frames` is nonzero, the model keeps ticking with no input between
+samples and trains on its own observed next state as a self-prediction signal.
 
 ## Layout
 
 - `include/vvm/`: public core interfaces.
 - `src/model.cpp`: state/op-bank/retrieval/update implementation.
+- `src/toy_training.cpp`: first synthetic training tasks.
 - `src/main.cpp`: CLI entry point.
 - `src/visualizer_sdl3.cpp`: SDL3 inspection path.
 - `tests/`: deterministic core smoke tests.
