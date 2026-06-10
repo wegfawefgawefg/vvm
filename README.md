@@ -62,4 +62,5 @@ so failed ops stop monopolizing the same region of state space.
 - `docs/vvm-seed-spec.md`: seed architecture notes.
 - `docs/model-architecture.md`: current model/training architecture.
 - `docs/continuous-vvm.md`: continuous-clock, curiosity, heat, and RL notes.
+- `docs/first-tasks.md`: first benchmark/task ladder and output socket notes.
 - `resources/`: local research references.
