@@ -267,6 +267,12 @@ original learning rate. Raising learning rate in proportion to the interval
 recovers the same `80-81%` ceiling, so the current every-frame window replay is
 not the obvious convergence bug.
 
+Class-register-width sweep: widening the no-socket class constraint is useful.
+`--class-registers 32 --state-dim 816 --class-start-frame 1` reached `87.5%`
+balanced accuracy on `mnist-01`, with much better class-1 recall than the
+two-register setup. A 1024/512 run peaked around `85.0%` before route drift
+pulled it toward class 0. Widths 8, 16, and 64 were worse in the tested schedule.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

@@ -99,11 +99,13 @@ retrieval sampling diagnostics: `mean_rank`, `mean_prob`, and
 `balanced_accuracy`, `class_margin`, `test_nonclass_loss`, and
 `test_class_loss`. `--hard-retrieval` uses the nearest op deterministically
 instead of sampling among top candidates.
-`--class-start-frame`, `--class-value-scale`, `--class-loss-weight`,
-`--train-interval`, `--retrieval-temperature`, `--lr-decay`, `--momentum`, and
-`--rejection-decay` are tuning knobs for register targets, training cadence,
-candidate sampling, and anti-collapse pressure. `--class-start-frame` delays
-class-register loss while still training reconstruction from frame 0.
+`--class-start-frame`, `--class-registers`, `--class-value-scale`,
+`--class-loss-weight`, `--train-interval`, `--retrieval-temperature`,
+`--lr-decay`, `--momentum`, and `--rejection-decay` are tuning knobs for
+register targets, training cadence, candidate sampling, and anti-collapse
+pressure. `--class-start-frame` delays class-register loss while still training
+reconstruction from frame 0. `--class-registers` widens the constrained class
+region by repeating the class code across more state dimensions.
 `--train-interval 1` trains the current recurrent window every frame; larger
 values train less often while preserving the same window.
 `--retrieval-temperature 0` keeps the default linear top-k weighting; positive

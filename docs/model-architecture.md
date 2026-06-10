@@ -162,6 +162,9 @@ Tuning notes:
   target normalization.
 - `--class-start-frame` delays class-register loss within each shown sample
   while keeping reconstruction/world-model pressure active.
+- `--class-registers` widens the class-register constraint by repeating the
+  class code across more state dimensions. This is still a state target, not a
+  separate readout model.
 - `--train-interval` controls how often the current recurrent window is trained.
   The default `1` trains every frame; higher values preserve the window but
   reduce repeated updates.
@@ -226,6 +229,15 @@ hidden bug. `--train-interval 2`, `4`, or `8` with the original learning rate
 undertrains. Scaling learning rate roughly with the interval recovers the same
 `80-81%` ceiling, but does not break it. The per-frame replay is acting like a
 useful structured update-strength schedule.
+
+Widening the class-register constraint is the first change to break the old
+binary MNIST ceiling. The default two-register setup peaked around `80.9%`.
+`--class-registers 32 --state-dim 816 --class-start-frame 1` reached `87.5%`
+balanced accuracy on the 512/256 split with balanced recall around
+`[89.1%,85.9%]`. A 1024/512 scale check peaked around `85.0%` and then drifted
+toward class 0, so the wider register gives the VM a stronger supervised state
+surface, but route drift remains unsolved. Width is not monotonic: 8 and 16
+registers underperformed, and 64 undertrained with the tested schedule.
 
 The gradient path now has a finite-difference direction test for weighted
 targets, including op-row renormalization. That test passed, so the current

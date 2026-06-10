@@ -167,13 +167,21 @@ float class_loss_weight_or(float configured, float fallback) {
     return configured > 0.0F ? configured : fallback;
 }
 
+std::size_t class_register_count(const TaskConfig& task_config, std::size_t class_count) {
+    return task_config.class_registers == 0U ? class_count : task_config.class_registers;
+}
+
 TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigned char label,
                              std::size_t state_dim, const TaskConfig& task_config) {
     constexpr std::size_t kImageDims = 784;
     constexpr std::size_t kDigitOffset = 784;
     constexpr std::size_t kDigitClasses = 10;
-    if (state_dim < kImageDims + kDigitClasses) {
-        throw std::invalid_argument("mnist task requires state_dim >= 794");
+    const std::size_t class_dims = class_register_count(task_config, kDigitClasses);
+    if (class_dims < kDigitClasses) {
+        throw std::invalid_argument("mnist class_registers must be >= 10");
+    }
+    if (state_dim < kImageDims + class_dims) {
+        throw std::invalid_argument("mnist task requires state_dim >= 784 + class_registers");
     }
 
     std::vector<float> input(state_dim, 0.0F);
@@ -191,7 +199,7 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
         target[i] = kImageWeight * input[i];
     }
     const std::vector<float> digit =
-        class_vector(kDigitClasses, static_cast<int>(label), static_cast<int>(kDigitClasses),
+        class_vector(class_dims, static_cast<int>(label), static_cast<int>(kDigitClasses),
                      task_config.vector_range);
     for (std::size_t i = 0; i < digit.size(); ++i) {
         target[kDigitOffset + i] = class_value_scale * digit[i];
@@ -205,6 +213,7 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
         .target_weights = std::move(target_weights),
         .label = static_cast<int>(label),
         .class_count = static_cast<int>(kDigitClasses),
+        .class_dims = class_dims,
         .class_offset = kDigitOffset,
     };
 }
@@ -214,8 +223,12 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
     constexpr std::size_t kImageDims = 784;
     constexpr std::size_t kDigitOffset = 784;
     constexpr std::size_t kDigitClasses = 2;
-    if (state_dim < kImageDims + kDigitClasses) {
-        throw std::invalid_argument("mnist-01 task requires state_dim >= 786");
+    const std::size_t class_dims = class_register_count(task_config, kDigitClasses);
+    if (class_dims < kDigitClasses) {
+        throw std::invalid_argument("mnist-01 class_registers must be >= 2");
+    }
+    if (state_dim < kImageDims + class_dims) {
+        throw std::invalid_argument("mnist-01 task requires state_dim >= 784 + class_registers");
     }
     if (label > 1U) {
         throw std::invalid_argument("mnist-01 sample requires label 0 or 1");
@@ -236,7 +249,7 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
         target[i] = kImageWeight * input[i];
     }
     const std::vector<float> digit =
-        class_vector(kDigitClasses, static_cast<int>(label), static_cast<int>(kDigitClasses),
+        class_vector(class_dims, static_cast<int>(label), static_cast<int>(kDigitClasses),
                      task_config.vector_range);
     for (std::size_t i = 0; i < digit.size(); ++i) {
         target[kDigitOffset + i] = class_value_scale * digit[i];
@@ -250,6 +263,7 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
         .target_weights = std::move(target_weights),
         .label = static_cast<int>(label),
         .class_count = static_cast<int>(kDigitClasses),
+        .class_dims = class_dims,
         .class_offset = kDigitOffset,
     };
 }
@@ -401,6 +415,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
             .target_weights = std::move(target_weights),
             .label = label ? 1 : 0,
             .class_count = 2,
+            .class_dims = class_target.size(),
             .class_offset = class_offset,
         };
     }
@@ -412,6 +427,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
             .target_weights = {},
             .label = label,
             .class_count = 4,
+            .class_dims = state_dim,
         };
     }
     case TaskKind::AlternatingBit: {
@@ -422,6 +438,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
             .target_weights = {},
             .label = !bit ? 1 : 0,
             .class_count = 2,
+            .class_dims = state_dim,
         };
     }
     case TaskKind::Xor: {
@@ -434,6 +451,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
             .target_weights = {},
             .label = first != second ? 1 : 0,
             .class_count = 2,
+            .class_dims = state_dim,
         };
     }
     case TaskKind::SineNext: {
@@ -502,11 +520,14 @@ void validate_sample(const TaskSample& sample, std::size_t state_dim) {
         throw std::invalid_argument(
             "task sample target weights size does not match model state_dim");
     }
+    if (sample.class_count > 0 && sample.class_offset + sample.class_dims > state_dim) {
+        throw std::invalid_argument("task sample class range exceeds model state_dim");
+    }
 }
 
-float class_score(std::span<const float> state, int class_count, std::size_t class_offset,
-                  VectorRange range, int candidate) {
-    if (class_count <= 0 || class_offset + static_cast<std::size_t>(class_count) > state.size()) {
+float class_score(std::span<const float> state, int class_count, std::size_t class_dims,
+                  std::size_t class_offset, VectorRange range, int candidate) {
+    if (class_count <= 0 || class_dims == 0U || class_offset + class_dims > state.size()) {
         throw std::invalid_argument("invalid class count");
     }
     if (candidate < 0 || candidate >= class_count) {
@@ -514,9 +535,10 @@ float class_score(std::span<const float> state, int class_count, std::size_t cla
     }
 
     float score = 0.0F;
-    for (int i = 0; i < class_count; ++i) {
-        const bool matches = i == candidate;
-        const float value = state[class_offset + static_cast<std::size_t>(i)];
+    for (std::size_t i = 0; i < class_dims; ++i) {
+        const bool matches =
+            static_cast<int>(i % static_cast<std::size_t>(class_count)) == candidate;
+        const float value = state[class_offset + i];
         if (range == VectorRange::Signed) {
             const float off_value =
                 class_count <= 2 ? -1.0F : -2.0F / static_cast<float>(class_count - 2);
@@ -528,12 +550,13 @@ float class_score(std::span<const float> state, int class_count, std::size_t cla
     return score;
 }
 
-int predicted_class(std::span<const float> state, int class_count, std::size_t class_offset,
-                    VectorRange range) {
+int predicted_class(std::span<const float> state, int class_count, std::size_t class_dims,
+                    std::size_t class_offset, VectorRange range) {
     int best = 0;
     float best_score = -std::numeric_limits<float>::infinity();
     for (int candidate = 0; candidate < class_count; ++candidate) {
-        const float score = class_score(state, class_count, class_offset, range, candidate);
+        const float score =
+            class_score(state, class_count, class_dims, class_offset, range, candidate);
         if (score > best_score) {
             best = candidate;
             best_score = score;
@@ -607,7 +630,7 @@ std::vector<float> target_weights_for_frame(const TaskSample& sample, std::size_
     std::vector<float> weights =
         sample.target_weights.empty() ? uniform_weights(state_dim, 1.0F) : sample.target_weights;
     const std::size_t class_begin = sample.class_offset;
-    const std::size_t class_end = class_begin + static_cast<std::size_t>(sample.class_count);
+    const std::size_t class_end = class_begin + sample.class_dims;
     if (class_end > weights.size()) {
         throw std::invalid_argument("class target range exceeds target weights");
     }
@@ -820,8 +843,7 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
             float nonclass_error_sum = 0.0F;
             float nonclass_weight_sum = 0.0F;
             const std::size_t class_begin = samples[i].class_offset;
-            const std::size_t class_end =
-                class_begin + static_cast<std::size_t>(samples[i].class_count);
+            const std::size_t class_end = class_begin + samples[i].class_dims;
             for (std::size_t dim = 0; dim < state.size(); ++dim) {
                 const float weight =
                     samples[i].target_weights.empty() ? 1.0F : samples[i].target_weights[dim];
@@ -843,20 +865,21 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
                 ++nonclass_loss_samples;
             }
 
-            const int predicted = predicted_class(
-                state, samples[i].class_count, samples[i].class_offset, task_config.vector_range);
+            const int predicted =
+                predicted_class(state, samples[i].class_count, samples[i].class_dims,
+                                samples[i].class_offset, task_config.vector_range);
             const float label_score =
-                class_score(state, samples[i].class_count, samples[i].class_offset,
-                            task_config.vector_range, samples[i].label);
+                class_score(state, samples[i].class_count, samples[i].class_dims,
+                            samples[i].class_offset, task_config.vector_range, samples[i].label);
             float best_other_score = -std::numeric_limits<float>::infinity();
             for (int candidate = 0; candidate < samples[i].class_count; ++candidate) {
                 if (candidate == samples[i].label) {
                     continue;
                 }
-                best_other_score =
-                    std::max(best_other_score,
-                             class_score(state, samples[i].class_count, samples[i].class_offset,
-                                         task_config.vector_range, candidate));
+                best_other_score = std::max(
+                    best_other_score,
+                    class_score(state, samples[i].class_count, samples[i].class_dims,
+                                samples[i].class_offset, task_config.vector_range, candidate));
             }
             class_margin_sum += label_score - best_other_score;
             const bool is_correct = predicted == samples[i].label;
