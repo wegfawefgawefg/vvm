@@ -1,5 +1,5 @@
 #include "vvm/model.hpp"
-#include "vvm/toy_training.hpp"
+#include "vvm/tasks.hpp"
 
 #include <charconv>
 #include <chrono>
@@ -13,7 +13,7 @@
 #ifdef VVM_WITH_SDL3
 namespace vvm {
 int run_visualizer(const Config& config);
-int run_training_visualizer(const Config& config, const ToyTaskConfig& task_config,
+int run_training_visualizer(const Config& config, const TaskConfig& task_config,
                             std::size_t epochs);
 } // namespace vvm
 #endif
@@ -25,10 +25,10 @@ void print_usage() {
               << "  vvm smoke\n"
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
-              << "  vvm train-toy [--epochs N] [--train-samples N] [--test-samples N] "
-                 "[--task copy-input|delayed-copy] [--sample-frames N] [--idle-frames N] "
-                 "[--window N] [--lr F]\n"
-              << "  vvm bench-tiny [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
+              << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
+                 "[--task copy-input|delayed-copy|alternating-bit|xor|sine-next] "
+                 "[--sample-frames N] [--idle-frames N] [--window N] [--lr F]\n"
+              << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm visualize-train [--epochs N] [--train-samples N] [--test-samples N] "
@@ -49,19 +49,31 @@ bool parse_float(std::string_view value, float& out) {
     return parsed.ec == std::errc{} && parsed.ptr == end;
 }
 
-bool parse_task(std::string_view value, vvm::ToyTaskKind& out) {
+bool parse_task(std::string_view value, vvm::TaskKind& out) {
     if (value == "copy" || value == "copy-input") {
-        out = vvm::ToyTaskKind::CopyInput;
+        out = vvm::TaskKind::CopyInput;
         return true;
     }
     if (value == "delayed-copy" || value == "delay" || value == "delayed") {
-        out = vvm::ToyTaskKind::DelayedCopy;
+        out = vvm::TaskKind::DelayedCopy;
+        return true;
+    }
+    if (value == "alternating-bit" || value == "alternating" || value == "alt-bit") {
+        out = vvm::TaskKind::AlternatingBit;
+        return true;
+    }
+    if (value == "xor") {
+        out = vvm::TaskKind::Xor;
+        return true;
+    }
+    if (value == "sine-next" || value == "sine") {
+        out = vvm::TaskKind::SineNext;
         return true;
     }
     return false;
 }
 
-bool parse_options(std::span<char*> args, vvm::Config& config, vvm::ToyTaskConfig& task_config,
+bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& task_config,
                    std::size_t& epochs) {
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string_view arg(args[i]);
@@ -191,12 +203,12 @@ int run_headless(const vvm::Config& config) {
     return 0;
 }
 
-int run_toy_training(const vvm::Config& config, const vvm::ToyTaskConfig& task_config,
-                     std::size_t epochs) {
+int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_config,
+                      std::size_t epochs) {
     vvm::Model model(config);
-    const vvm::ToyDataset dataset = vvm::make_toy_dataset(config, task_config);
+    const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
 
-    std::cout << "toy=" << vvm::toy_task_name(task_config.task) << " epochs=" << epochs
+    std::cout << "task=" << vvm::task_name(task_config.task) << " epochs=" << epochs
               << " train_samples=" << dataset.train.size()
               << " test_samples=" << dataset.test.size()
               << " sample_frames=" << task_config.frames_per_sample
@@ -208,26 +220,28 @@ int run_toy_training(const vvm::Config& config, const vvm::ToyTaskConfig& task_c
 
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
         const vvm::LossPoint loss =
-            vvm::train_toy_epoch(model, dataset.train, dataset.test, task_config, epoch);
+            vvm::train_task_epoch(model, dataset.train, dataset.test, task_config, epoch);
         std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << loss.train_loss
                   << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss << '\n';
     }
     return 0;
 }
 
-int run_tiny_benchmarks(vvm::Config config, vvm::ToyTaskConfig base_task_config,
-                        std::size_t epochs) {
+int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, std::size_t epochs) {
     struct BenchTask {
-        vvm::ToyTaskKind task = vvm::ToyTaskKind::CopyInput;
+        vvm::TaskKind task = vvm::TaskKind::CopyInput;
         std::size_t idle_frames = 0;
     };
 
     const BenchTask tasks[] = {
-        BenchTask{.task = vvm::ToyTaskKind::CopyInput, .idle_frames = 0},
-        BenchTask{.task = vvm::ToyTaskKind::DelayedCopy, .idle_frames = 8},
+        BenchTask{.task = vvm::TaskKind::CopyInput, .idle_frames = 0},
+        BenchTask{.task = vvm::TaskKind::DelayedCopy, .idle_frames = 8},
+        BenchTask{.task = vvm::TaskKind::AlternatingBit, .idle_frames = 0},
+        BenchTask{.task = vvm::TaskKind::Xor, .idle_frames = 0},
+        BenchTask{.task = vvm::TaskKind::SineNext, .idle_frames = 0},
     };
 
-    std::cout << "tiny_bench" << " epochs=" << epochs << " state_dim=" << config.state_dim
+    std::cout << "task_bench" << " epochs=" << epochs << " state_dim=" << config.state_dim
               << " ops=" << config.num_ops << " candidates=" << config.candidate_count
               << " train_samples=" << base_task_config.train_samples
               << " test_samples=" << base_task_config.test_samples
@@ -235,18 +249,18 @@ int run_tiny_benchmarks(vvm::Config config, vvm::ToyTaskConfig base_task_config,
               << " window=" << base_task_config.window_size << '\n';
 
     for (const BenchTask& bench_task : tasks) {
-        vvm::ToyTaskConfig task_config = base_task_config;
+        vvm::TaskConfig task_config = base_task_config;
         task_config.task = bench_task.task;
         task_config.idle_frames_between_samples = bench_task.idle_frames;
 
         vvm::Model model(config);
-        const vvm::ToyDataset dataset = vvm::make_toy_dataset(config, task_config);
-        const float initial_test = vvm::evaluate_toy_loss(model, dataset.test, task_config);
+        const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+        const float initial_test = vvm::evaluate_task_loss(model, dataset.test, task_config);
 
         const auto begin = std::chrono::steady_clock::now();
         vvm::LossPoint loss{};
         for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
-            loss = vvm::train_toy_epoch(model, dataset.train, dataset.test, task_config, epoch);
+            loss = vvm::train_task_epoch(model, dataset.train, dataset.test, task_config, epoch);
         }
         const auto end = std::chrono::steady_clock::now();
         const double seconds = std::chrono::duration<double>(end - begin).count();
@@ -258,12 +272,11 @@ int run_tiny_benchmarks(vvm::Config config, vvm::ToyTaskConfig base_task_config,
         const double epoch_rate = seconds > 0.0 ? static_cast<double>(epochs) / seconds : 0.0;
         const float improvement = initial_test - loss.test_loss;
 
-        std::cout << "task=" << vvm::toy_task_name(task_config.task)
-                  << " initial_test=" << initial_test << " final_train=" << loss.train_loss
-                  << " final_self=" << loss.self_loss << " final_test=" << loss.test_loss
-                  << " improvement=" << improvement << " seconds=" << seconds
-                  << " train_ticks=" << train_ticks << " tick_rate=" << tick_rate
-                  << " epoch_rate=" << epoch_rate << '\n';
+        std::cout << "task=" << vvm::task_name(task_config.task) << " initial_test=" << initial_test
+                  << " final_train=" << loss.train_loss << " final_self=" << loss.self_loss
+                  << " final_test=" << loss.test_loss << " improvement=" << improvement
+                  << " seconds=" << seconds << " train_ticks=" << train_ticks
+                  << " tick_rate=" << tick_rate << " epoch_rate=" << epoch_rate << '\n';
     }
 
     return 0;
@@ -279,7 +292,7 @@ int main(int argc, char** argv) {
 
     try {
         vvm::Config config{};
-        vvm::ToyTaskConfig task_config{};
+        vvm::TaskConfig task_config{};
         std::size_t epochs = 200;
         const std::string_view command(argv[1]);
         const std::span<char*> options(argv + 2, static_cast<std::size_t>(argc - 2));
@@ -292,12 +305,12 @@ int main(int argc, char** argv) {
             return run_headless(config);
         }
 
-        if (command == "train-toy") {
-            return run_toy_training(config, task_config, epochs);
+        if (command == "train-task") {
+            return run_task_training(config, task_config, epochs);
         }
 
-        if (command == "bench-tiny") {
-            return run_tiny_benchmarks(config, task_config, epochs);
+        if (command == "bench-tasks") {
+            return run_task_benchmarks(config, task_config, epochs);
         }
 
         if (command == "visualize") {

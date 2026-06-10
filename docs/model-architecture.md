@@ -586,7 +586,7 @@ bootstrapped value target over the candidate choices available to VVM.
 1. Add tick ring buffer and training cache.
 2. Implement manual one-step next-state op update.
 3. Add recency weighting and gradient clipping.
-4. Run tiny sequence prediction tasks.
+4. Run the first generated sequence prediction tasks.
 5. Add prediction-progress curiosity baseline.
 6. Add external reward stream.
 7. Add value readout and truncated returns.

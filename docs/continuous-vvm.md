@@ -246,7 +246,7 @@ Outputs should initially be sampled from state:
 output = readout(S)
 ```
 
-For toy problems, readout can start as direct selected dimensions, then become a
+For early tasks, readout can start as direct selected dimensions, then become a
 small learned linear map. Avoid a large output head early, because it can solve
 the task while the VVM core does nothing.
 
@@ -265,7 +265,7 @@ Questions to test:
 - should actors have private state heat but shared op-bank learning?
 - do actors need separate value/curiosity baselines?
 
-## Immediate Toy Problems
+## Immediate Tasks
 
 Start with simple continuous sequence tasks:
 

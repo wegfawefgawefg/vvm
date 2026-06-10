@@ -2,7 +2,7 @@
 
 Seed repo for a C++ Vector Virtual Machine experiment.
 
-The first target is a tiny VVM core:
+The first target is a compact VVM core:
 
 ```text
 state -> dot ops -> top candidates -> sample one op -> mul-add -> ReLU -> normalize -> next state
@@ -36,27 +36,29 @@ cmake --build --preset dev-sdl3
 ./build/vvm smoke
 ./build/vvm run --steps 8 --state-dim 256 --ops 1024 --candidates 8 --update-scale 1.0
 ./build/vvm run --steps 8 --state-heat 0.01 --op-heat 0.001 --heat-decay 0.999
-./build/vvm train-toy --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
-./build/vvm bench-tiny --epochs 50 --state-dim 16 --ops 64 --candidates 4 --train-samples 16 --test-samples 8 --sample-frames 8 --window 8 --lr 0.1
+./build/vvm train-task --task copy-input --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
+./build/vvm bench-tasks --epochs 50 --state-dim 16 --ops 64 --candidates 4 --train-samples 16 --test-samples 8 --sample-frames 8 --window 8 --lr 0.1
 ./build-sdl3/vvm visualize --steps 256
 ./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
 ```
 
-`smoke`, `run`, `train-toy`, and `bench-tiny` are headless. `visualize` and
+`smoke`, `run`, `train-task`, and `bench-tasks` are headless. `visualize` and
 `visualize-train` require `VVM_BUILD_VISUALIZER=ON` and SDL3.
 
-The first toy task is `copy-input`: a nonnegative input vector is shown for
-`--sample-frames` ticks and the model trains state toward that same vector.
-When `--idle-frames` is nonzero, the model keeps ticking with no input between
-samples and trains on its own observed next state as a self-prediction signal.
-`--rejection-scale` adds a weak local repulsion from high-loss query/op matches,
-so failed ops stop monopolizing the same region of state space.
+Current generated tasks are `copy-input`, `delayed-copy`, `alternating-bit`,
+`xor`, and `sine-next`. `copy-input` shows a nonnegative input vector for
+`--sample-frames` ticks and trains state toward that same vector. `delayed-copy`
+keeps ticking with no input for `--idle-frames` and then trains state toward the
+original vector. Other idle ticks train on the model's own observed next state
+as a self-prediction signal. `--rejection-scale` adds a weak local repulsion
+from high-loss query/op matches, so failed ops stop monopolizing the same region
+of state space.
 
 ## Layout
 
 - `include/vvm/`: public core interfaces.
 - `src/model.cpp`: state/op-bank/retrieval/update implementation.
-- `src/toy_training.cpp`: first synthetic training tasks.
+- `src/tasks.cpp`: first synthetic training tasks.
 - `src/main.cpp`: CLI entry point.
 - `src/visualizer_sdl3.cpp`: SDL3 inspection path.
 - `tests/`: deterministic core smoke tests.

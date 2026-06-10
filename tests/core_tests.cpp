@@ -1,5 +1,5 @@
 #include "vvm/model.hpp"
-#include "vvm/toy_training.hpp"
+#include "vvm/tasks.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -227,7 +227,7 @@ void test_observation_creates_curiosity_without_heat() {
     assert(std::fabs(tick.reward.total_reward - tick.reward.curiosity_reward) < 1.0e-6F);
 }
 
-void test_toy_training_runs() {
+void test_task_training_runs(vvm::TaskKind task_kind, std::size_t idle_frames) {
     vvm::Config config{};
     config.state_dim = 8;
     config.num_ops = 32;
@@ -235,52 +235,30 @@ void test_toy_training_runs() {
     config.state_heat_stddev = 0.0F;
     config.op_heat_stddev = 0.0F;
 
-    vvm::ToyTaskConfig task_config{};
+    vvm::TaskConfig task_config{};
+    task_config.task = task_kind;
     task_config.train_samples = 8;
     task_config.test_samples = 4;
     task_config.frames_per_sample = 4;
+    task_config.idle_frames_between_samples = idle_frames;
     task_config.window_size = 4;
     task_config.learning_rate = 0.05F;
 
     vvm::Model model(config);
-    const vvm::ToyDataset dataset = vvm::make_toy_dataset(config, task_config);
-    const float before = vvm::evaluate_toy_loss(model, dataset.test, task_config);
+    const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+    const float before = vvm::evaluate_task_loss(model, dataset.test, task_config);
     const vvm::LossPoint loss =
-        vvm::train_toy_epoch(model, dataset.train, dataset.test, task_config, 0);
+        vvm::train_task_epoch(model, dataset.train, dataset.test, task_config, 0);
 
     assert(std::isfinite(before));
     assert(std::isfinite(loss.train_loss));
     assert(std::isfinite(loss.test_loss));
     assert(loss.train_loss >= 0.0F);
     assert(loss.test_loss >= 0.0F);
-}
-
-void test_delayed_copy_training_runs() {
-    vvm::Config config{};
-    config.state_dim = 8;
-    config.num_ops = 32;
-    config.candidate_count = 4;
-
-    vvm::ToyTaskConfig task_config{};
-    task_config.task = vvm::ToyTaskKind::DelayedCopy;
-    task_config.train_samples = 8;
-    task_config.test_samples = 4;
-    task_config.frames_per_sample = 4;
-    task_config.idle_frames_between_samples = 4;
-    task_config.window_size = 4;
-    task_config.learning_rate = 0.05F;
-
-    vvm::Model model(config);
-    const vvm::ToyDataset dataset = vvm::make_toy_dataset(config, task_config);
-    const vvm::LossPoint loss =
-        vvm::train_toy_epoch(model, dataset.train, dataset.test, task_config, 0);
-
-    assert(std::isfinite(loss.train_loss));
-    assert(std::isfinite(loss.self_loss));
-    assert(std::isfinite(loss.test_loss));
-    assert(loss.train_loss >= 0.0F);
-    assert(loss.self_loss >= 0.0F);
-    assert(loss.test_loss >= 0.0F);
+    if (idle_frames > 0U) {
+        assert(std::isfinite(loss.self_loss));
+        assert(loss.self_loss >= 0.0F);
+    }
 }
 
 void test_invalid_config() {
@@ -309,8 +287,11 @@ int main() {
     test_train_window_updates_only_chosen_ops();
     test_rejection_lowers_bad_op_affinity();
     test_observation_creates_curiosity_without_heat();
-    test_toy_training_runs();
-    test_delayed_copy_training_runs();
+    test_task_training_runs(vvm::TaskKind::CopyInput, 0U);
+    test_task_training_runs(vvm::TaskKind::DelayedCopy, 4U);
+    test_task_training_runs(vvm::TaskKind::AlternatingBit, 0U);
+    test_task_training_runs(vvm::TaskKind::Xor, 0U);
+    test_task_training_runs(vvm::TaskKind::SineNext, 0U);
     test_invalid_config();
 
     std::cout << "vvm core tests passed\n";

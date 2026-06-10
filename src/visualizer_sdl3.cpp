@@ -1,6 +1,6 @@
 #include "vvm/model.hpp"
 #include "vvm/sdl_text.hpp"
-#include "vvm/toy_training.hpp"
+#include "vvm/tasks.hpp"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -76,7 +76,7 @@ void draw_trace(SDL_Renderer* renderer, const Model& model, const RunResult& res
     draw_text(renderer, 20, overlay, 14.0F, 14.0F, SDL_Color{235, 240, 245, 255});
 }
 
-void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const ToyTaskConfig& task_config,
+void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const TaskConfig& task_config,
                      std::span<const LossPoint> history, std::size_t target_epochs, int width,
                      int height) {
     SDL_SetRenderDrawColor(renderer, 10, 12, 16, 255);
@@ -134,7 +134,7 @@ void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const ToyTaskCo
 
     char overlay[640];
     std::snprintf(overlay, sizeof(overlay),
-                  "vvm toy training  epoch=%zu/%zu  params=%zu  %.2f MiB\n"
+                  "vvm task training  epoch=%zu/%zu  params=%zu  %.2f MiB\n"
                   "train_loss=%.6f  self_loss=%.6f  test_loss=%.6f  max_loss=%.6f\n"
                   "samples train=%zu test=%zu  sample_frames=%zu  idle_frames=%zu  window=%zu  "
                   "lr=%.4f  reject=%.4f@%.4f",
@@ -199,7 +199,7 @@ int run_visualizer(const Config& config) {
     return 0;
 }
 
-int run_training_visualizer(const Config& config, const ToyTaskConfig& task_config,
+int run_training_visualizer(const Config& config, const TaskConfig& task_config,
                             std::size_t epochs) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw_sdl_error("SDL_Init failed");
@@ -215,7 +215,7 @@ int run_training_visualizer(const Config& config, const ToyTaskConfig& task_conf
     init_text_subsystem();
 
     Model model(config);
-    const ToyDataset dataset = make_toy_dataset(config, task_config);
+    const TaskDataset dataset = make_task_dataset(config, task_config);
     std::vector<LossPoint> history;
     history.reserve(epochs);
 
@@ -230,7 +230,7 @@ int run_training_visualizer(const Config& config, const ToyTaskConfig& task_conf
 
         if (history.size() < epochs) {
             history.push_back(
-                train_toy_epoch(model, dataset.train, dataset.test, task_config, history.size()));
+                train_task_epoch(model, dataset.train, dataset.test, task_config, history.size()));
         }
 
         int width = 0;

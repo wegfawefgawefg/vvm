@@ -94,7 +94,7 @@ Purpose:
 - proves repeated input presentation works
 - gives an immediate loss curve
 
-Current repo has a first version of this as `train-toy`.
+Current repo has a first version of this as `train-task`.
 
 ### 2. Delayed Copy
 
@@ -212,5 +212,5 @@ CartPole prediction
 tiny gridworld
 ```
 
-Do not skip the tiny tasks. They tell us whether failures are architectural or
+Do not skip the small generated tasks. They tell us whether failures are architectural or
 just dataset scale.

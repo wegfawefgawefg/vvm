@@ -93,7 +93,7 @@ endif()
 
 add_library(vvm_core STATIC
     src/model.cpp
-    src/toy_training.cpp
+    src/tasks.cpp
 )
 add_library(vvm::core ALIAS vvm_core)
 
