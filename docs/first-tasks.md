@@ -147,12 +147,13 @@ First 16-op no-socket results:
 ```text
 basis-4 reaches 100% accuracy quickly
 xor reaches roughly 75% before destabilizing
-linear-2 does not converge, despite being linearly separable
+linear-2 reaches 100% once written as input-preserving class registers
 ```
 
-The same generated `linear-2` dataset reaches 100% with the linear readout
-socket, so the task is valid. The failure is in the no-socket VVM learning path
-or target geometry.
+The failed early `linear-2` version used a class-only target vector. That exposed
+the key/value conflict directly: the input query and target value lived in
+different regions. The current version preserves the input dimensions and writes
+the answer into class registers.
 
 ### 5. Two Moons / Circles
 
@@ -222,9 +223,11 @@ too dissimilar. The current probe preserves image state and adds digit
 registers so the core gets both sample reconstruction and class determination
 pressure.
 
-Latest 16-op no-socket result: `mnist-01` stays near chance and 10-class MNIST
-stays random, while linear readout sockets solve the same raw inputs easily.
-This points to the VVM core update/target path rather than the data.
+Latest no-socket result: `mnist-01` improves with weighted class-register loss
+and more ops. A 512-op, 1024-sample run reached about 76% with broad op usage,
+but it is not converged. 10-class MNIST remains unsolved. Linear readout sockets
+still solve the same raw inputs easily, so the remaining problem is in the VVM
+core retrieval/update dynamics rather than the data loader.
 
 ### 8. CartPole Observation Prediction
 

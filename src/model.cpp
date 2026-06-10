@@ -229,7 +229,30 @@ float Model::prediction_error(std::span<const float> predicted, std::span<const 
     return sum / static_cast<float>(predicted.size());
 }
 
-void apply_observation(Tick& tick, std::span<const float> observed, float curiosity_scale) {
+float Model::prediction_error(std::span<const float> predicted, std::span<const float> observed,
+                              std::span<const float> weights) {
+    if (predicted.size() != observed.size() || predicted.size() != weights.size()) {
+        throw std::invalid_argument("weighted prediction_error requires equal vector sizes");
+    }
+
+    float sum = 0.0F;
+    float weight_sum = 0.0F;
+    for (std::size_t i = 0; i < predicted.size(); ++i) {
+        if (weights[i] < 0.0F) {
+            throw std::invalid_argument("prediction_error weights must be nonnegative");
+        }
+        const float error = observed[i] - predicted[i];
+        sum += weights[i] * error * error;
+        weight_sum += weights[i];
+    }
+    if (weight_sum <= 0.0F) {
+        return 0.0F;
+    }
+    return sum / weight_sum;
+}
+
+void apply_observation(Tick& tick, std::span<const float> observed, float curiosity_scale,
+                       std::span<const float> weights) {
     if (tick.predicted_state.size() != observed.size()) {
         throw std::invalid_argument(
             "apply_observation requires observed size to match predicted state");
@@ -239,7 +262,17 @@ void apply_observation(Tick& tick, std::span<const float> observed, float curios
     }
 
     tick.observed_state.assign(observed.begin(), observed.end());
-    tick.prediction_error = Model::prediction_error(tick.predicted_state, tick.observed_state);
+    if (!weights.empty()) {
+        if (weights.size() != observed.size()) {
+            throw std::invalid_argument("observation weights must match observed state size");
+        }
+        tick.observation_weights.assign(weights.begin(), weights.end());
+        tick.prediction_error =
+            Model::prediction_error(tick.predicted_state, tick.observed_state, weights);
+    } else {
+        tick.observation_weights.clear();
+        tick.prediction_error = Model::prediction_error(tick.predicted_state, tick.observed_state);
+    }
     tick.reward.curiosity_reward = curiosity_scale * tick.prediction_error;
     tick.reward.total_reward = tick.reward.curiosity_reward;
     if (tick.reward.has_external_reward) {
@@ -315,7 +348,8 @@ Model::Prediction Model::predict_from_working_state(std::span<const float> worki
 Model::Prediction Model::predict_from_working_state(std::span<const float> working_state,
                                                     std::mt19937& rng) const {
     Retrieval retrieval = retrieve(working_state);
-    const std::size_t chosen_rank = sample_weighted(retrieval.candidate_weights, rng);
+    const std::size_t chosen_rank =
+        config_.sample_retrieval ? sample_weighted(retrieval.candidate_weights, rng) : 0U;
     retrieval.chosen_index = retrieval.candidate_indices[chosen_rank];
     retrieval.chosen_score = dot_product(
         working_state,
@@ -395,6 +429,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         .post_activation = std::move(prediction.post_activation),
         .predicted_state = std::move(prediction.state),
         .observed_state = state,
+        .observation_weights = {},
         .activation_mean = prediction.activation_mean,
         .reward = reward,
         .state_heat_stddev = state_heat,
@@ -445,6 +480,11 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         if (!tick.working_state.empty() && tick.working_state.size() != config_.state_dim) {
             throw std::invalid_argument("tick working_state is incompatible with model config");
         }
+        if (!tick.observation_weights.empty() &&
+            tick.observation_weights.size() != config_.state_dim) {
+            throw std::invalid_argument(
+                "tick observation_weights is incompatible with model config");
+        }
 
         const std::size_t age = ticks.size() - 1U - tick_index;
         const float recency_weight = std::pow(train_config.recency_decay, static_cast<float>(age));
@@ -453,10 +493,24 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         error_sum += tick.prediction_error;
 
         std::vector<float> grad_pred(config_.state_dim, 0.0F);
-        for (std::size_t i = 0; i < config_.state_dim; ++i) {
-            grad_pred[i] = recency_weight * 2.0F *
-                           (tick.predicted_state[i] - tick.observed_state[i]) /
-                           static_cast<float>(config_.state_dim);
+        if (tick.observation_weights.empty()) {
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                grad_pred[i] = recency_weight * 2.0F *
+                               (tick.predicted_state[i] - tick.observed_state[i]) /
+                               static_cast<float>(config_.state_dim);
+            }
+        } else {
+            float observation_weight_sum = 0.0F;
+            for (const float weight : tick.observation_weights) {
+                observation_weight_sum += weight;
+            }
+            if (observation_weight_sum > 0.0F) {
+                for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                    grad_pred[i] = recency_weight * 2.0F * tick.observation_weights[i] *
+                                   (tick.predicted_state[i] - tick.observed_state[i]) /
+                                   observation_weight_sum;
+                }
+            }
         }
 
         std::vector<float> grad_post =

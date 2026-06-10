@@ -29,6 +29,7 @@ struct Config {
     float op_heat_stddev = 0.0F;
     float heat_decay = 1.0F;
     float curiosity_scale = 1.0F;
+    bool sample_retrieval = true;
     std::uint32_t seed = 0xC0FFEEU;
 };
 
@@ -61,6 +62,7 @@ struct Tick {
     std::vector<float> post_activation;
     std::vector<float> predicted_state;
     std::vector<float> observed_state;
+    std::vector<float> observation_weights;
 
     float activation_mean = 0.0F;
     float prediction_error = 0.0F;
@@ -138,6 +140,9 @@ class Model {
 
     [[nodiscard]] static float prediction_error(std::span<const float> predicted,
                                                 std::span<const float> observed);
+    [[nodiscard]] static float prediction_error(std::span<const float> predicted,
+                                                std::span<const float> observed,
+                                                std::span<const float> weights);
 
   private:
     struct Prediction {
@@ -161,6 +166,7 @@ class Model {
 
 [[nodiscard]] float l2_norm(std::span<const float> values);
 [[nodiscard]] float dot_product(std::span<const float> a, std::span<const float> b);
-void apply_observation(Tick& tick, std::span<const float> observed, float curiosity_scale);
+void apply_observation(Tick& tick, std::span<const float> observed, float curiosity_scale,
+                       std::span<const float> weights = {});
 
 } // namespace vvm

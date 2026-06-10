@@ -40,7 +40,7 @@ void print_usage() {
               << "  vvm smoke\n"
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--activation deadzone] [--update-scale F] "
-                 "[--state-heat F] [--op-heat F] [--heat-decay F]\n"
+                 "[--state-heat F] [--op-heat F] [--heat-decay F] [--hard-retrieval]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
                  "sine-next|mnist-01|mnist] "
@@ -184,6 +184,14 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
                    CliOptions& cli_options) {
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string_view arg(args[i]);
+        if (arg == "--hard-retrieval" || arg == "--greedy-retrieval") {
+            config.sample_retrieval = false;
+            continue;
+        }
+        if (arg == "--sample-retrieval") {
+            config.sample_retrieval = true;
+            continue;
+        }
         if (i + 1 >= args.size()) {
             std::cerr << "missing value for " << arg << '\n';
             return false;
@@ -323,6 +331,20 @@ const char* readout_source_name(ReadoutSource source) {
     return "unknown";
 }
 
+void print_counts(std::string_view name, std::span<const std::size_t> counts) {
+    if (counts.empty()) {
+        return;
+    }
+    std::cout << ' ' << name << "=[";
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+        if (i > 0U) {
+            std::cout << ',';
+        }
+        std::cout << counts[i];
+    }
+    std::cout << ']';
+}
+
 std::size_t infer_class_count(std::span<const vvm::TaskSample> samples) {
     int class_count = 0;
     for (const vvm::TaskSample& sample : samples) {
@@ -443,6 +465,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                   << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss;
         if (loss.accuracy_samples > 0U) {
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
+            print_counts("labels", loss.label_counts);
+            print_counts("preds", loss.prediction_counts);
         }
         std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
                   << " learn_l2=" << loss.learning_update_l2 << " bank_delta_l2=" << bank_delta_l2

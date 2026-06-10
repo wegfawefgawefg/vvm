@@ -30,6 +30,7 @@ enum class TaskKind {
 struct TaskSample {
     std::vector<float> input;
     std::vector<float> target;
+    std::vector<float> target_weights;
     int label = -1;
     int class_count = 0;
     std::size_t class_offset = 0;
@@ -61,6 +62,8 @@ struct EvalMetrics {
     float loss = 0.0F;
     float accuracy = 0.0F;
     std::size_t accuracy_samples = 0;
+    std::vector<std::size_t> label_counts;
+    std::vector<std::size_t> prediction_counts;
 };
 
 struct LossPoint {
@@ -81,6 +84,8 @@ struct LossPoint {
     std::size_t max_op_train_index = 0;
     float max_op_heat_l2 = 0.0F;
     float max_op_train_l2 = 0.0F;
+    std::vector<std::size_t> label_counts;
+    std::vector<std::size_t> prediction_counts;
     std::vector<std::size_t> op_selection_counts;
     std::vector<float> op_heat_l2_by_op;
     std::vector<float> op_train_l2_by_op;

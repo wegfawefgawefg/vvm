@@ -127,6 +127,18 @@ The no-socket 16-op bank can solve `basis-4`, but it does not solve `linear-2`
 or `mnist-01`. Linear readout sockets solve those same raw inputs immediately.
 That makes `linear-2` the current smallest failure case for the core trainer.
 
+Update: `linear-2` now uses the same input-preserving register target shape as
+MNIST. With that target geometry, the pure 16-op base VM reaches 100% quickly.
+The old label-prototype version failed because it asked a homogeneous op vector
+to be retrieved by an input-like query while moving state toward a dissimilar
+class-only prototype.
+
+Weighted observations are now supported for no-socket state targets. This lets
+tasks keep reconstruction pressure on input dimensions while applying stronger
+loss to class registers. Binary MNIST improves with more ops and weighted class
+registers; a 512-op, 1024-sample run reached about 76% on `mnist-01`, but it is
+not solved yet.
+
 Further probes:
 
 - keep homogeneous ops but add a small readout socket to ask whether class

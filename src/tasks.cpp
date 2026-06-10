@@ -80,6 +80,10 @@ std::vector<float> class_vector(std::size_t size, int label, int class_count, Ve
     return values;
 }
 
+std::vector<float> uniform_weights(std::size_t size, float value = 1.0F) {
+    return std::vector<float>(size, value);
+}
+
 std::vector<float> bit_vector(std::size_t size, bool bit, VectorRange range) {
     if (range == VectorRange::Signed && size > 1U) {
         std::vector<float> values(size, 0.0F);
@@ -175,8 +179,10 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
     normalize_l2(input);
 
     std::vector<float> target(state_dim, 0.0F);
+    std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
     constexpr float kImageWeight = 1.0F;
     constexpr float kClassWeight = 2.0F;
+    constexpr float kClassTargetWeight = 64.0F;
     for (std::size_t i = 0; i < pixels.size(); ++i) {
         target[i] = kImageWeight * input[i];
     }
@@ -184,12 +190,14 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
                                                   static_cast<int>(kDigitClasses), range);
     for (std::size_t i = 0; i < digit.size(); ++i) {
         target[kDigitOffset + i] = kClassWeight * digit[i];
+        target_weights[kDigitOffset + i] = kClassTargetWeight;
     }
     normalize_l2(target);
 
     return TaskSample{
         .input = std::move(input),
         .target = std::move(target),
+        .target_weights = std::move(target_weights),
         .label = static_cast<int>(label),
         .class_count = static_cast<int>(kDigitClasses),
         .class_offset = kDigitOffset,
@@ -215,8 +223,10 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
     normalize_l2(input);
 
     std::vector<float> target(state_dim, 0.0F);
+    std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
     constexpr float kImageWeight = 1.0F;
     constexpr float kClassWeight = 2.0F;
+    constexpr float kClassTargetWeight = 128.0F;
     for (std::size_t i = 0; i < pixels.size(); ++i) {
         target[i] = kImageWeight * input[i];
     }
@@ -224,12 +234,14 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
                                                   static_cast<int>(kDigitClasses), range);
     for (std::size_t i = 0; i < digit.size(); ++i) {
         target[kDigitOffset + i] = kClassWeight * digit[i];
+        target_weights[kDigitOffset + i] = kClassTargetWeight;
     }
     normalize_l2(target);
 
     return TaskSample{
         .input = std::move(input),
         .target = std::move(target),
+        .target_weights = std::move(target_weights),
         .label = static_cast<int>(label),
         .class_count = static_cast<int>(kDigitClasses),
         .class_offset = kDigitOffset,
@@ -324,6 +336,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = input,
             .target = std::move(input),
+            .target_weights = {},
         };
     }
     case TaskKind::DelayedCopy: {
@@ -333,27 +346,41 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = input,
             .target = std::move(input),
+            .target_weights = {},
         };
     }
     case TaskKind::Linear2: {
         std::normal_distribution<float> noise(0.0F, 0.08F);
         const bool label = ((index + offset) % 2U) != 0U;
         std::vector<float> input(state_dim, 0.0F);
+        const std::size_t class_offset = state_dim > 2U ? state_dim - 2U : 0U;
         input[0] = label ? 1.0F : -1.0F;
-        for (std::size_t i = 1; i < input.size(); ++i) {
+        for (std::size_t i = 1; i < class_offset; ++i) {
             input[i] = noise(rng);
         }
         if (range == VectorRange::Nonnegative) {
-            for (float& value : input) {
-                value = (value + 1.0F) * 0.5F;
+            for (std::size_t i = 0; i < class_offset; ++i) {
+                input[i] = (input[i] + 1.0F) * 0.5F;
             }
         }
         normalize_l2(input);
+        std::vector<float> target = input;
+        std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
+        const std::vector<float> class_target = class_vector(2, label ? 1 : 0, 2, range);
+        constexpr float kClassWeight = 2.0F;
+        constexpr float kClassTargetWeight = 16.0F;
+        for (std::size_t i = 0; i < class_target.size(); ++i) {
+            target[class_offset + i] = kClassWeight * class_target[i];
+            target_weights[class_offset + i] = kClassTargetWeight;
+        }
+        normalize_l2(target);
         return TaskSample{
             .input = std::move(input),
-            .target = class_vector(state_dim, label ? 1 : 0, 2, range),
+            .target = std::move(target),
+            .target_weights = std::move(target_weights),
             .label = label ? 1 : 0,
             .class_count = 2,
+            .class_offset = class_offset,
         };
     }
     case TaskKind::Basis4: {
@@ -361,6 +388,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = basis_vector(state_dim, static_cast<std::size_t>(label)),
             .target = class_vector(state_dim, label, 4, range),
+            .target_weights = {},
             .label = label,
             .class_count = 4,
         };
@@ -370,6 +398,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = bit_vector(state_dim, bit, range),
             .target = bit_vector(state_dim, !bit, range),
+            .target_weights = {},
             .label = !bit ? 1 : 0,
             .class_count = 2,
         };
@@ -381,6 +410,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = binary_pair_vector(state_dim, first, second, range),
             .target = bit_vector(state_dim, first != second, range),
+            .target_weights = {},
             .label = first != second ? 1 : 0,
             .class_count = 2,
         };
@@ -395,6 +425,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = sine_phase_vector(state_dim, phase, range),
             .target = sine_phase_vector(state_dim, next_phase, range),
+            .target_weights = {},
         };
     }
     case TaskKind::Mnist:
@@ -445,6 +476,10 @@ TaskDataset make_mnist_binary_dataset(const Config& model_config, const TaskConf
 void validate_sample(const TaskSample& sample, std::size_t state_dim) {
     if (sample.input.size() != state_dim || sample.target.size() != state_dim) {
         throw std::invalid_argument("task sample vector size does not match model state_dim");
+    }
+    if (!sample.target_weights.empty() && sample.target_weights.size() != state_dim) {
+        throw std::invalid_argument(
+            "task sample target weights size does not match model state_dim");
     }
 }
 
@@ -630,6 +665,12 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
     float loss_sum = 0.0F;
     std::size_t correct = 0;
     std::size_t accuracy_samples = 0;
+    int max_class_count = 0;
+    for (const TaskSample& sample : samples) {
+        max_class_count = std::max(max_class_count, sample.class_count);
+    }
+    std::vector<std::size_t> label_counts(static_cast<std::size_t>(max_class_count), 0U);
+    std::vector<std::size_t> prediction_counts(static_cast<std::size_t>(max_class_count), 0U);
     for (std::size_t i = 0; i < samples.size(); ++i) {
         validate_sample(samples[i], model.config().state_dim);
         std::vector<float> state = neutral_state(model.config().state_dim);
@@ -645,12 +686,20 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
             }
         }
 
-        loss_sum += Model::prediction_error(state, samples[i].target);
+        loss_sum +=
+            samples[i].target_weights.empty()
+                ? Model::prediction_error(state, samples[i].target)
+                : Model::prediction_error(state, samples[i].target, samples[i].target_weights);
         if (samples[i].label >= 0 && samples[i].class_count > 0) {
-            correct += predicted_class(state, samples[i].class_count, samples[i].class_offset,
-                                       task_config.vector_range) == samples[i].label
-                           ? 1U
-                           : 0U;
+            const int predicted = predicted_class(
+                state, samples[i].class_count, samples[i].class_offset, task_config.vector_range);
+            correct += predicted == samples[i].label ? 1U : 0U;
+            if (static_cast<std::size_t>(samples[i].label) < label_counts.size()) {
+                ++label_counts[static_cast<std::size_t>(samples[i].label)];
+            }
+            if (predicted >= 0 && static_cast<std::size_t>(predicted) < prediction_counts.size()) {
+                ++prediction_counts[static_cast<std::size_t>(predicted)];
+            }
             ++accuracy_samples;
         }
     }
@@ -660,6 +709,8 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
                         ? 0.0F
                         : static_cast<float>(correct) / static_cast<float>(accuracy_samples),
         .accuracy_samples = accuracy_samples,
+        .label_counts = std::move(label_counts),
+        .prediction_counts = std::move(prediction_counts),
     };
 }
 
@@ -717,7 +768,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                 ((epoch * train_samples.size()) + order_index) * task_config.frames_per_sample +
                 frame;
             Tick tick = model.tick(state, rng, clock, sample.input);
-            apply_observation(tick, sample.target, model.config().curiosity_scale);
+            apply_observation(tick, sample.target, model.config().curiosity_scale,
+                              sample.target_weights);
             record_tick_diagnostics(tick, diagnostics);
 
             train_loss_sum += tick.prediction_error;
@@ -738,7 +790,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                 task_config.frames_per_sample + frame;
             Tick tick = model.tick(state, rng, clock);
             if (task_config.task == TaskKind::DelayedCopy) {
-                apply_observation(tick, sample.target, model.config().curiosity_scale);
+                apply_observation(tick, sample.target, model.config().curiosity_scale,
+                                  sample.target_weights);
             }
             record_tick_diagnostics(tick, diagnostics);
 
@@ -761,6 +814,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     diagnostics.test_loss = metrics.loss;
     diagnostics.test_accuracy = metrics.accuracy;
     diagnostics.accuracy_samples = metrics.accuracy_samples;
+    diagnostics.label_counts = metrics.label_counts;
+    diagnostics.prediction_counts = metrics.prediction_counts;
     finalize_op_usage(diagnostics);
     return diagnostics;
 }
