@@ -233,6 +233,59 @@ void test_train_window_moves_prediction_toward_observation() {
     assert(after_loss < before_loss);
 }
 
+void test_repeated_identical_ticks_do_not_shrink_update() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.update_scale = 1.0F;
+    config.sample_retrieval = false;
+    config.state_heat_stddev = 0.0F;
+    config.op_heat_stddev = 0.0F;
+
+    auto make_tick = [&config](vvm::Model& model) {
+        std::vector<float> state = model.seeded_state();
+        std::mt19937 rng(config.seed);
+        vvm::Tick tick = model.tick(state, rng, 0);
+
+        std::size_t active_index = 0;
+        for (std::size_t i = 0; i < tick.post_activation.size(); ++i) {
+            if (std::fabs(tick.post_activation[i]) > 0.0F) {
+                active_index = i;
+                break;
+            }
+        }
+
+        std::vector<float> target = tick.predicted_state;
+        target[active_index] += 0.25F;
+        const float target_norm = vvm::l2_norm(target);
+        for (float& value : target) {
+            value /= target_norm;
+        }
+        vvm::apply_observation(tick, target, config.curiosity_scale);
+        return tick;
+    };
+
+    vvm::Model one_tick_model(config);
+    vvm::Tick one_tick = make_tick(one_tick_model);
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 0.1F;
+    train_config.max_grad_norm = 10.0F;
+    const vvm::TrainResult one_tick_result =
+        one_tick_model.train_window(std::span<const vvm::Tick>(&one_tick, 1), train_config);
+
+    vvm::Model repeated_tick_model(config);
+    vvm::Tick repeated_tick = make_tick(repeated_tick_model);
+    const std::vector<vvm::Tick> repeated_ticks = {repeated_tick, repeated_tick};
+    const vvm::TrainResult repeated_tick_result =
+        repeated_tick_model.train_window(repeated_ticks, train_config);
+
+    assert(one_tick_result.updated_ops == 1U);
+    assert(repeated_tick_result.updated_ops == 1U);
+    assert(std::fabs(one_tick_result.learning_update_l2 -
+                     repeated_tick_result.learning_update_l2) < 1.0e-5F);
+}
+
 void test_rejection_lowers_bad_op_affinity() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -358,6 +411,7 @@ int main() {
     test_tick_masks_missing_external_reward();
     test_train_window_updates_only_chosen_ops();
     test_train_window_moves_prediction_toward_observation();
+    test_repeated_identical_ticks_do_not_shrink_update();
     test_rejection_lowers_bad_op_affinity();
     test_observation_creates_curiosity_without_heat();
     test_task_training_runs(vvm::TaskKind::CopyInput, 0U);

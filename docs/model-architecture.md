@@ -633,10 +633,13 @@ Use:
 - recency weighting
 - gradient clipping
 - per-op gradient accumulation
-- optional division by number of times an op was chosen in the window
+- averaging by total recency weight for the window
 - row normalization after update
 
-Repeated chosen-op hits in one window can otherwise over-update a single vector.
+Do not also divide by the number of times an op was chosen after dividing by
+the total window weight. If one op is selected for two identical ticks, the
+weighted-mean gradient should match the one-tick update, not shrink by another
+factor of two. A core regression test now covers that invariant.
 
 ## Continuous Stability
 
