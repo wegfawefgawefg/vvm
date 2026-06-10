@@ -591,6 +591,10 @@ void record_tick_diagnostics(const Tick& tick, const TaskSample& sample, std::si
         }
     }
     loss.mean_chosen_prob += tick.chosen_prob;
+    if (tick.candidate_scores.size() >= 2U) {
+        loss.mean_top_score_gap += tick.candidate_scores[0] - tick.candidate_scores[1];
+        loss.mean_chosen_score_gap += tick.max_score - tick.chosen_score;
+    }
     for (const float probability : tick.candidate_probs) {
         if (probability > 0.0F) {
             loss.mean_candidate_entropy -= probability * std::log(probability);
@@ -680,6 +684,8 @@ void finalize_op_usage(LossPoint& loss) {
         loss.mean_chosen_rank *= inv_total;
         loss.mean_chosen_prob *= inv_total;
         loss.mean_candidate_entropy *= inv_total;
+        loss.mean_top_score_gap *= inv_total;
+        loss.mean_chosen_score_gap *= inv_total;
     }
 
     for (std::size_t op = 0; op < loss.op_heat_l2_by_op.size(); ++op) {

@@ -325,6 +325,21 @@ route_purity = sum_op max_label_count(op) / labeled_op_selections
 For two labels, `route_purity` near 0.5 means both labels are using the same op
 routes. Values closer to 1.0 mean selected ops are label-specialized.
 
+Retrieval margin diagnostics report:
+
+```text
+top_gap = mean(score_top1 - score_top2)
+chosen_gap = mean(score_top1 - score_chosen)
+```
+
+`top_gap` measures how close the nearest-neighbor route boundary is. `chosen_gap`
+measures how far sampled training choices are from the greedy best op. On the
+current best-bank-anchored `mnist-01` run, `top_gap` stayed around `0.368-0.370`
+while `chosen_gap` stayed around `0.126-0.131`. So average nearest-op boundaries
+are not razor-thin, but training does often update non-best sampled ops while
+evaluation uses greedy top-1. That points the next probe toward training/eval
+retrieval mismatch rather than just raw top-1 boundary fragility.
+
 Current deterministic-eval MNIST-01 probes show an important drift pattern:
 useful class behavior appears early, then continued training can reduce
 accuracy even as class margin rises. Lower learning rates and LR/rejection

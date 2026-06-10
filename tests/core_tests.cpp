@@ -40,6 +40,7 @@ void test_run_shape() {
     for (const vvm::StepTrace& trace : result.trace) {
         assert(trace.retrieval.candidate_indices.size() == config.candidate_count);
         assert(trace.retrieval.candidate_weights.size() == config.candidate_count);
+        assert(trace.retrieval.candidate_scores.size() == config.candidate_count);
         assert(trace.retrieval.chosen_index < config.num_ops);
         assert(std::find(trace.retrieval.candidate_indices.begin(),
                          trace.retrieval.candidate_indices.end(),

@@ -37,6 +37,7 @@ struct Config {
 struct Retrieval {
     std::vector<std::size_t> candidate_indices;
     std::vector<float> candidate_weights;
+    std::vector<float> candidate_scores;
     std::size_t chosen_index = 0;
     float chosen_score = 0.0F;
     float max_score = 0.0F;
@@ -55,6 +56,7 @@ struct Tick {
     std::vector<float> working_state;
     std::vector<std::size_t> candidate_indices;
     std::vector<float> candidate_probs;
+    std::vector<float> candidate_scores;
     std::size_t chosen_op = 0;
     float chosen_prob = 0.0F;
     float chosen_score = 0.0F;

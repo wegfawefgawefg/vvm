@@ -768,6 +768,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                   << " op_entropy=" << loss.op_selection_entropy
                   << " mean_rank=" << loss.mean_chosen_rank
                   << " mean_prob=" << loss.mean_chosen_prob
+                  << " top_gap=" << loss.mean_top_score_gap
+                  << " chosen_gap=" << loss.mean_chosen_score_gap
                   << " candidate_entropy=" << loss.mean_candidate_entropy;
         print_top_counts("top_select", loss.op_selection_counts);
         print_top_floats("top_train", loss.op_train_l2_by_op);

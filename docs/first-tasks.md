@@ -339,6 +339,13 @@ recovered the current `85.7%` best-bank-anchored plateau, but did not improve
 past it. That makes the gate safer than unconditional retention, but neutral at
 the tested setting.
 
+Route margin diagnostics now show `top_gap` and `chosen_gap`. On the current
+best-bank-anchored `mnist-01` run, `top_gap` stayed near `0.368-0.370`, so the
+average top-1 boundary is not tiny. `chosen_gap` stayed near `0.126-0.131`,
+meaning sampled training often updates ops below the greedy best candidate. The
+next retrieval-side suspect is therefore train/eval sampling mismatch, not just
+fragile nearest-neighbor margins.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

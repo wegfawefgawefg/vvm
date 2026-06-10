@@ -317,6 +317,7 @@ Retrieval Model::retrieve(std::span<const float> state) const {
     Retrieval retrieval{};
     retrieval.candidate_indices.resize(config_.candidate_count);
     retrieval.candidate_weights.resize(config_.candidate_count);
+    retrieval.candidate_scores.resize(config_.candidate_count);
     retrieval.max_score = scores.front().first;
     const float min_candidate_score = scores[config_.candidate_count - 1U].first;
 
@@ -324,6 +325,7 @@ Retrieval Model::retrieve(std::span<const float> state) const {
         float weight_sum = 0.0F;
         for (std::size_t i = 0; i < config_.candidate_count; ++i) {
             retrieval.candidate_indices[i] = scores[i].second;
+            retrieval.candidate_scores[i] = scores[i].first;
             retrieval.candidate_weights[i] =
                 std::exp((scores[i].first - retrieval.max_score) / config_.retrieval_temperature);
             weight_sum += retrieval.candidate_weights[i];
@@ -335,6 +337,7 @@ Retrieval Model::retrieve(std::span<const float> state) const {
         float weight_sum = 0.0F;
         for (std::size_t i = 0; i < config_.candidate_count; ++i) {
             retrieval.candidate_indices[i] = scores[i].second;
+            retrieval.candidate_scores[i] = scores[i].first;
             retrieval.candidate_weights[i] =
                 std::max(scores[i].first - min_candidate_score + 1.0e-6F, 1.0e-6F);
             weight_sum += retrieval.candidate_weights[i];
@@ -452,6 +455,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         .working_state = std::move(working_state),
         .candidate_indices = std::move(prediction.retrieval.candidate_indices),
         .candidate_probs = std::move(prediction.retrieval.candidate_weights),
+        .candidate_scores = std::move(prediction.retrieval.candidate_scores),
         .chosen_op = prediction.retrieval.chosen_index,
         .chosen_prob = chosen_prob,
         .chosen_score = prediction.retrieval.chosen_score,
@@ -821,6 +825,7 @@ RunResult Model::run(std::span<const float> initial_state) {
         Retrieval retrieval{};
         retrieval.candidate_indices = tick_result.candidate_indices;
         retrieval.candidate_weights = tick_result.candidate_probs;
+        retrieval.candidate_scores = tick_result.candidate_scores;
         retrieval.chosen_index = tick_result.chosen_op;
         retrieval.chosen_score = tick_result.chosen_score;
         retrieval.max_score = tick_result.max_score;

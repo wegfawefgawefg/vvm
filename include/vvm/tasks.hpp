@@ -104,6 +104,8 @@ struct LossPoint {
     float mean_chosen_rank = 0.0F;
     float mean_chosen_prob = 0.0F;
     float mean_candidate_entropy = 0.0F;
+    float mean_top_score_gap = 0.0F;
+    float mean_chosen_score_gap = 0.0F;
     std::size_t accuracy_samples = 0;
     std::size_t updated_ops = 0;
     std::size_t selected_ops = 0;
