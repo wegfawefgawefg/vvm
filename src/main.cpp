@@ -1,8 +1,11 @@
 #include "vvm/model.hpp"
+#include "vvm/readout.hpp"
 #include "vvm/tasks.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <iomanip>
 #include <iostream>
@@ -21,6 +24,17 @@ int run_training_visualizer(const Config& config, const TaskConfig& task_config,
 
 namespace {
 
+enum class ReadoutSource {
+    Input,
+    Vvm,
+};
+
+struct CliOptions {
+    std::size_t epochs = 200;
+    float readout_learning_rate = 0.1F;
+    ReadoutSource readout_source = ReadoutSource::Input;
+};
+
 void print_usage() {
     std::cout << "usage:\n"
               << "  vvm smoke\n"
@@ -28,9 +42,12 @@ void print_usage() {
                  "[--activation deadzone] [--update-scale F] "
                  "[--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
-                 "[--task copy-input|delayed-copy|alternating-bit|xor|sine-next|mnist] "
+                 "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
+                 "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
                  "[--idle-frames N] [--window N] [--lr F]\n"
+              << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
+                 "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
@@ -64,6 +81,14 @@ bool parse_task(std::string_view value, vvm::TaskKind& out) {
         out = vvm::TaskKind::DelayedCopy;
         return true;
     }
+    if (value == "linear-2" || value == "linear2" || value == "linearly-separable") {
+        out = vvm::TaskKind::Linear2;
+        return true;
+    }
+    if (value == "basis-4" || value == "basis4" || value == "four-class-basis") {
+        out = vvm::TaskKind::Basis4;
+        return true;
+    }
     if (value == "alternating-bit" || value == "alternating" || value == "alt-bit") {
         out = vvm::TaskKind::AlternatingBit;
         return true;
@@ -74,6 +99,10 @@ bool parse_task(std::string_view value, vvm::TaskKind& out) {
     }
     if (value == "sine-next" || value == "sine") {
         out = vvm::TaskKind::SineNext;
+        return true;
+    }
+    if (value == "mnist-01" || value == "mnist01" || value == "mnist-0-1") {
+        out = vvm::TaskKind::Mnist01;
         return true;
     }
     if (value == "mnist") {
@@ -115,6 +144,18 @@ bool parse_vector_range(std::string_view value, vvm::VectorRange& out) {
     return false;
 }
 
+bool parse_readout_source(std::string_view value, ReadoutSource& out) {
+    if (value == "input" || value == "raw") {
+        out = ReadoutSource::Input;
+        return true;
+    }
+    if (value == "vvm" || value == "state") {
+        out = ReadoutSource::Vvm;
+        return true;
+    }
+    return false;
+}
+
 const char* activation_name(vvm::ActivationKind activation) {
     switch (activation) {
     case vvm::ActivationKind::Relu:
@@ -140,7 +181,7 @@ const char* vector_range_name(vvm::VectorRange range) {
 }
 
 bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& task_config,
-                   std::size_t& epochs) {
+                   CliOptions& cli_options) {
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string_view arg(args[i]);
         if (i + 1 >= args.size()) {
@@ -212,7 +253,15 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
                 return false;
             }
         } else if (arg == "--epochs") {
-            if (!parse_size(value, epochs)) {
+            if (!parse_size(value, cli_options.epochs)) {
+                return false;
+            }
+        } else if (arg == "--readout-lr") {
+            if (!parse_float(value, cli_options.readout_learning_rate)) {
+                return false;
+            }
+        } else if (arg == "--readout-source") {
+            if (!parse_readout_source(value, cli_options.readout_source)) {
                 return false;
             }
         } else if (arg == "--train-samples") {
@@ -264,6 +313,84 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
     return true;
 }
 
+const char* readout_source_name(ReadoutSource source) {
+    switch (source) {
+    case ReadoutSource::Input:
+        return "input";
+    case ReadoutSource::Vvm:
+        return "vvm";
+    }
+    return "unknown";
+}
+
+std::size_t infer_class_count(std::span<const vvm::TaskSample> samples) {
+    int class_count = 0;
+    for (const vvm::TaskSample& sample : samples) {
+        if (sample.class_count > class_count) {
+            class_count = sample.class_count;
+        }
+        if (sample.label >= 0) {
+            class_count = std::max(class_count, sample.label + 1);
+        }
+    }
+    if (class_count <= 0) {
+        throw std::invalid_argument("readout training requires labeled samples");
+    }
+    return static_cast<std::size_t>(class_count);
+}
+
+std::vector<float> readout_features(vvm::Model& model, const vvm::TaskSample& sample,
+                                    const vvm::TaskConfig& task_config, ReadoutSource source,
+                                    std::mt19937& rng, std::size_t base_clock) {
+    if (source == ReadoutSource::Input) {
+        return sample.input;
+    }
+
+    std::vector<float> state = vvm::neutral_state(model.config().state_dim);
+    for (std::size_t frame = 0; frame < task_config.frames_per_sample; ++frame) {
+        static_cast<void>(model.tick(state, rng, base_clock + frame, sample.input));
+    }
+    return state;
+}
+
+vvm::ReadoutMetrics evaluate_readout(vvm::Model& model, const vvm::LinearReadout& readout,
+                                     std::span<const vvm::TaskSample> samples,
+                                     const vvm::TaskConfig& task_config, ReadoutSource source,
+                                     std::uint32_t seed) {
+    std::mt19937 rng(seed);
+    vvm::ReadoutMetrics metrics{};
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        const vvm::TaskSample& sample = samples[i];
+        if (sample.label < 0) {
+            continue;
+        }
+        const std::vector<float> features = readout_features(
+            model, sample, task_config, source, rng, i * task_config.frames_per_sample);
+        metrics.loss += readout.loss_one(features, sample.label);
+        metrics.accuracy += readout.predict(features) == sample.label ? 1.0F : 0.0F;
+        ++metrics.samples;
+    }
+
+    if (metrics.samples > 0U) {
+        metrics.loss /= static_cast<float>(metrics.samples);
+        metrics.accuracy /= static_cast<float>(metrics.samples);
+    }
+    return metrics;
+}
+
+float span_delta_l2(std::span<const float> before, std::span<const float> after) {
+    if (before.size() != after.size()) {
+        throw std::invalid_argument("span_delta_l2 requires equal sizes");
+    }
+
+    float sum = 0.0F;
+    for (std::size_t i = 0; i < before.size(); ++i) {
+        const float delta = after[i] - before[i];
+        sum += delta * delta;
+    }
+    return std::sqrt(sum);
+}
+
 int run_headless(const vvm::Config& config) {
     vvm::Model model(config);
     const std::vector<float> initial_state = model.seeded_state();
@@ -292,6 +419,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                       std::size_t epochs) {
     vvm::Model model(config);
     const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+    const std::vector<float> initial_bank(model.op_bank().begin(), model.op_bank().end());
 
     std::cout << "task=" << vvm::task_name(task_config.task) << " epochs=" << epochs
               << " train_samples=" << dataset.train.size()
@@ -306,20 +434,95 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " params=" << model.parameter_count() << '\n';
 
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
+        const std::vector<float> epoch_bank_before(model.op_bank().begin(), model.op_bank().end());
         const vvm::LossPoint loss =
             vvm::train_task_epoch(model, dataset.train, dataset.test, task_config, epoch);
+        const float bank_delta_l2 = span_delta_l2(epoch_bank_before, model.op_bank());
+        const float bank_from_init_l2 = span_delta_l2(initial_bank, model.op_bank());
         std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << loss.train_loss
                   << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss;
         if (loss.accuracy_samples > 0U) {
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
         }
         std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
-                  << " learn_l2=" << loss.learning_update_l2
+                  << " learn_l2=" << loss.learning_update_l2 << " bank_delta_l2=" << bank_delta_l2
+                  << " bank_from_init_l2=" << bank_from_init_l2
+                  << " max_op_heat=" << loss.max_op_heat_index << ":" << loss.max_op_heat_l2
+                  << " max_op_train=" << loss.max_op_train_index << ":" << loss.max_op_train_l2
                   << " selected_ops=" << loss.selected_ops << "/" << config.num_ops
                   << " max_op_select=" << loss.max_op_selections
                   << " op_entropy=" << loss.op_selection_entropy;
         std::cout << '\n';
     }
+    return 0;
+}
+
+int run_readout_training(const vvm::Config& config, const vvm::TaskConfig& task_config,
+                         const CliOptions& cli_options) {
+    vvm::Model model(config);
+    const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+    const std::size_t class_count = infer_class_count(dataset.train);
+    const std::size_t input_dim =
+        cli_options.readout_source == ReadoutSource::Input ? config.state_dim : config.state_dim;
+
+    vvm::LinearReadout readout(vvm::ReadoutConfig{
+        .input_dim = input_dim,
+        .class_count = class_count,
+        .learning_rate = cli_options.readout_learning_rate,
+    });
+
+    std::cout << "readout task=" << vvm::task_name(task_config.task)
+              << " source=" << readout_source_name(cli_options.readout_source)
+              << " epochs=" << cli_options.epochs << " train_samples=" << dataset.train.size()
+              << " test_samples=" << dataset.test.size() << " classes=" << class_count
+              << " readout_lr=" << cli_options.readout_learning_rate
+              << " sample_frames=" << task_config.frames_per_sample
+              << " core_params=" << model.parameter_count()
+              << " readout_params=" << readout.parameter_count()
+              << " total_params=" << (model.parameter_count() + readout.parameter_count()) << '\n';
+
+    std::vector<std::size_t> order(dataset.train.size());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        order[i] = i;
+    }
+
+    for (std::size_t epoch = 0; epoch < cli_options.epochs; ++epoch) {
+        std::mt19937 shuffle_rng(task_config.seed ^ static_cast<std::uint32_t>(epoch));
+        std::shuffle(order.begin(), order.end(), shuffle_rng);
+
+        float train_loss = 0.0F;
+        float train_accuracy = 0.0F;
+        std::size_t trained = 0;
+        std::mt19937 feature_rng(task_config.seed ^ 0xA53A9U ^ static_cast<std::uint32_t>(epoch));
+        for (std::size_t order_index = 0; order_index < order.size(); ++order_index) {
+            const vvm::TaskSample& sample = dataset.train[order[order_index]];
+            if (sample.label < 0) {
+                continue;
+            }
+            const std::size_t clock =
+                ((epoch * order.size()) + order_index) * task_config.frames_per_sample;
+            const std::vector<float> features = readout_features(
+                model, sample, task_config, cli_options.readout_source, feature_rng, clock);
+            train_loss += readout.train_one(features, sample.label);
+            train_accuracy += readout.predict(features) == sample.label ? 1.0F : 0.0F;
+            ++trained;
+        }
+
+        if (trained > 0U) {
+            train_loss /= static_cast<float>(trained);
+            train_accuracy /= static_cast<float>(trained);
+        }
+
+        const vvm::ReadoutMetrics test =
+            evaluate_readout(model, readout, dataset.test, task_config, cli_options.readout_source,
+                             task_config.seed ^ 0x7E57U ^ static_cast<std::uint32_t>(epoch));
+
+        std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << train_loss
+                  << " train_accuracy=" << (100.0F * train_accuracy) << "%"
+                  << " test_loss=" << test.loss << " test_accuracy=" << (100.0F * test.accuracy)
+                  << "%" << " samples=" << test.samples << '\n';
+    }
+
     return 0;
 }
 
@@ -380,6 +583,8 @@ int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, st
         }
         std::cout << " heat_l2=" << (loss.state_heat_l2 + loss.op_heat_l2)
                   << " learn_l2=" << loss.learning_update_l2
+                  << " max_op_heat=" << loss.max_op_heat_index << ":" << loss.max_op_heat_l2
+                  << " max_op_train=" << loss.max_op_train_index << ":" << loss.max_op_train_l2
                   << " selected_ops=" << loss.selected_ops << "/" << config.num_ops
                   << " max_op_select=" << loss.max_op_selections
                   << " op_entropy=" << loss.op_selection_entropy << " seconds=" << seconds
@@ -401,10 +606,10 @@ int main(int argc, char** argv) {
     try {
         vvm::Config config{};
         vvm::TaskConfig task_config{};
-        std::size_t epochs = 200;
+        CliOptions cli_options{};
         const std::string_view command(argv[1]);
         const std::span<char*> options(argv + 2, static_cast<std::size_t>(argc - 2));
-        if (!parse_options(options, config, task_config, epochs)) {
+        if (!parse_options(options, config, task_config, cli_options)) {
             print_usage();
             return 2;
         }
@@ -414,11 +619,15 @@ int main(int argc, char** argv) {
         }
 
         if (command == "train-task") {
-            return run_task_training(config, task_config, epochs);
+            return run_task_training(config, task_config, cli_options.epochs);
+        }
+
+        if (command == "train-readout") {
+            return run_readout_training(config, task_config, cli_options);
         }
 
         if (command == "bench-tasks") {
-            return run_task_benchmarks(config, task_config, epochs);
+            return run_task_benchmarks(config, task_config, cli_options.epochs);
         }
 
         if (command == "visualize") {
@@ -432,7 +641,7 @@ int main(int argc, char** argv) {
 
         if (command == "visualize-train") {
 #ifdef VVM_WITH_SDL3
-            return vvm::run_training_visualizer(config, task_config, epochs);
+            return vvm::run_training_visualizer(config, task_config, cli_options.epochs);
 #else
             std::cerr << "visualizer was not built. Reconfigure with cmake --preset dev-sdl3.\n";
             return 2;

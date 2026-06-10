@@ -37,8 +37,11 @@ cmake --build --preset dev-sdl3
 ./build/vvm run --steps 8 --state-dim 256 --ops 1024 --candidates 8 --activation deadzone --update-scale 1.0
 ./build/vvm run --steps 8 --state-heat 0.01 --op-heat 0.001 --heat-decay 0.999
 ./build/vvm train-task --task copy-input --activation deadzone --vectors signed --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
+./build/vvm train-task --task basis-4 --state-dim 16 --ops 16 --candidates 8 --epochs 30 --lr 0.1 --rejection-scale 0.05
+./build/vvm train-readout --task linear-2 --state-dim 16 --ops 16 --epochs 10 --readout-source input --readout-lr 0.1
 ./build/vvm bench-tasks --activation deadzone --vectors signed --epochs 50 --state-dim 16 --ops 64 --candidates 4 --train-samples 16 --test-samples 8 --sample-frames 8 --window 8 --lr 0.1
 ./scripts/fetch_mnist.sh
+./build/vvm train-task --task mnist-01 --state-dim 794 --ops 16 --candidates 8 --train-samples 512 --test-samples 256 --sample-frames 8 --window 8 --epochs 30 --lr 0.1 --rejection-scale 0.05
 ./build/vvm train-task --task mnist --state-dim 794 --ops 2048 --candidates 8 --train-samples 512 --test-samples 128 --sample-frames 8 --window 8 --epochs 10 --lr 0.05
 ./build-sdl3/vvm visualize --steps 256
 ./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
@@ -59,9 +62,10 @@ modes are kept as ablation/control modes for sanity checks, not as knobs to tune
 per task. `--vectors signed|nonnegative` is also available for baseline
 comparison.
 
-Current generated tasks are `copy-input`, `delayed-copy`, `alternating-bit`,
-`xor`, and `sine-next`. MNIST is available as `--task mnist` after running
-`scripts/fetch_mnist.sh`; the data is stored under ignored `resources/mnist/`.
+Current generated tasks are `copy-input`, `delayed-copy`, `linear-2`, `basis-4`,
+`alternating-bit`, `xor`, and `sine-next`. MNIST is available as `--task
+mnist-01` and `--task mnist` after running `scripts/fetch_mnist.sh`; the data is
+stored under ignored `resources/mnist/`.
 `copy-input` shows an input vector for
 `--sample-frames` ticks and trains state toward that same vector. `delayed-copy`
 keeps ticking with no input for `--idle-frames` and then trains state toward the
@@ -73,6 +77,11 @@ of state space.
 MNIST v0 maps each 28x28 image into the first 784 state dimensions and trains a
 mixed target: reconstruct the image region and set 10 digit registers in
 `state[784..793]`. The CLI reports exact `test_accuracy` for class-like tasks.
+`mnist-01` uses the same image region with a two-class register for digits 0 and
+1. `train-task` also reports heat L2, summed learning update L2, actual op-bank
+delta L2 for the epoch, total drift from initialization, selected op count, max
+op reuse, normalized op-selection entropy, and the highest per-op heat/train
+pressure for the epoch.
 
 ## Layout
 

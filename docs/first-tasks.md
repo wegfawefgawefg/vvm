@@ -134,6 +134,26 @@ Purpose:
 - tests nonlinear composition
 - separates memorization from simple linear readout
 
+Current task names:
+
+```text
+linear-2
+basis-4
+xor
+```
+
+First 16-op no-socket results:
+
+```text
+basis-4 reaches 100% accuracy quickly
+xor reaches roughly 75% before destabilizing
+linear-2 does not converge, despite being linearly separable
+```
+
+The same generated `linear-2` dataset reaches 100% with the linear readout
+socket, so the task is valid. The failure is in the no-socket VVM learning path
+or target geometry.
+
 ### 5. Two Moons / Circles
 
 Use 2D classification with a class socket.
@@ -183,6 +203,14 @@ Current repo support:
   --epochs 10 --lr 0.05
 ```
 
+There is also a binary MNIST probe:
+
+```sh
+./build/vvm train-task --task mnist-01 --state-dim 794 --ops 16 --candidates 8 \
+  --train-samples 512 --test-samples 256 --sample-frames 8 --window 8 \
+  --epochs 30 --lr 0.1 --rejection-scale 0.05
+```
+
 This first version is VVM-native rather than a standard classifier head: the
 image is embedded into `state[0..783]`, and the target both reconstructs that
 image region and writes the label into digit registers at `state[784..793]`.
@@ -193,6 +221,10 @@ stayed near random accuracy. That version made the image query and digit target
 too dissimilar. The current probe preserves image state and adds digit
 registers so the core gets both sample reconstruction and class determination
 pressure.
+
+Latest 16-op no-socket result: `mnist-01` stays near chance and 10-class MNIST
+stays random, while linear readout sockets solve the same raw inputs easily.
+This points to the VVM core update/target path rather than the data.
 
 ### 8. CartPole Observation Prediction
 

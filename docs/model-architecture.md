@@ -113,6 +113,20 @@ state[784..793]  digit registers
 This asks the same state to retain the sample and determine its class. It gives
 the op bank more information from the data than a label-only target.
 
+Current diagnostic ladder:
+
+```text
+linear-2       linearly separable 2-class vectors
+basis-4        four one-hot basis classes
+xor            nonlinear 2-bit classification
+mnist-01       MNIST digits 0 and 1
+mnist          full 10-class MNIST
+```
+
+The no-socket 16-op bank can solve `basis-4`, but it does not solve `linear-2`
+or `mnist-01`. Linear readout sockets solve those same raw inputs immediately.
+That makes `linear-2` the current smallest failure case for the core trainer.
+
 Further probes:
 
 - keep homogeneous ops but add a small readout socket to ask whether class

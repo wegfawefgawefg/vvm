@@ -196,6 +196,46 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
     };
 }
 
+TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, unsigned char label,
+                                    std::size_t state_dim, VectorRange range) {
+    constexpr std::size_t kImageDims = 784;
+    constexpr std::size_t kDigitOffset = 784;
+    constexpr std::size_t kDigitClasses = 2;
+    if (state_dim < kImageDims + kDigitClasses) {
+        throw std::invalid_argument("mnist-01 task requires state_dim >= 786");
+    }
+    if (label > 1U) {
+        throw std::invalid_argument("mnist-01 sample requires label 0 or 1");
+    }
+
+    std::vector<float> input(state_dim, 0.0F);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+        input[i] = static_cast<float>(pixels[i]) / 255.0F;
+    }
+    normalize_l2(input);
+
+    std::vector<float> target(state_dim, 0.0F);
+    constexpr float kImageWeight = 1.0F;
+    constexpr float kClassWeight = 2.0F;
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+        target[i] = kImageWeight * input[i];
+    }
+    const std::vector<float> digit = class_vector(kDigitClasses, static_cast<int>(label),
+                                                  static_cast<int>(kDigitClasses), range);
+    for (std::size_t i = 0; i < digit.size(); ++i) {
+        target[kDigitOffset + i] = kClassWeight * digit[i];
+    }
+    normalize_l2(target);
+
+    return TaskSample{
+        .input = std::move(input),
+        .target = std::move(target),
+        .label = static_cast<int>(label),
+        .class_count = static_cast<int>(kDigitClasses),
+        .class_offset = kDigitOffset,
+    };
+}
+
 void append_mnist_split(std::vector<TaskSample>& samples, const std::filesystem::path& images_path,
                         const std::filesystem::path& labels_path, std::size_t requested_count,
                         std::size_t state_dim, VectorRange range) {
@@ -235,6 +275,44 @@ void append_mnist_split(std::vector<TaskSample>& samples, const std::filesystem:
     }
 }
 
+void append_mnist_binary_split(std::vector<TaskSample>& samples,
+                               const std::filesystem::path& images_path,
+                               const std::filesystem::path& labels_path,
+                               std::size_t requested_count, std::size_t state_dim,
+                               VectorRange range) {
+    std::ifstream images = open_binary(images_path);
+    std::ifstream labels = open_binary(labels_path);
+
+    const std::uint32_t image_magic = read_be_u32(images, images_path);
+    const std::uint32_t image_count = read_be_u32(images, images_path);
+    const std::uint32_t rows = read_be_u32(images, images_path);
+    const std::uint32_t cols = read_be_u32(images, images_path);
+
+    const std::uint32_t label_magic = read_be_u32(labels, labels_path);
+    const std::uint32_t label_count = read_be_u32(labels, labels_path);
+
+    if (image_magic != 2051U || label_magic != 2049U || rows != 28U || cols != 28U ||
+        image_count != label_count) {
+        throw std::runtime_error("invalid MNIST IDX files in " +
+                                 images_path.parent_path().string());
+    }
+
+    std::array<unsigned char, 784> pixels = {};
+    for (std::size_t i = 0; i < image_count && samples.size() < requested_count; ++i) {
+        unsigned char label = 0;
+        images.read(reinterpret_cast<char*>(pixels.data()),
+                    static_cast<std::streamsize>(pixels.size()));
+        labels.read(reinterpret_cast<char*>(&label), 1);
+        if (!images || !labels) {
+            throw std::runtime_error("truncated MNIST IDX files in " +
+                                     images_path.parent_path().string());
+        }
+        if (label <= 1U) {
+            samples.push_back(make_mnist_binary_sample(pixels, label, state_dim, range));
+        }
+    }
+}
+
 TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t index,
                        std::size_t offset, VectorRange range, std::mt19937& rng) {
     const std::size_t state_dim = model_config.state_dim;
@@ -255,6 +333,36 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = input,
             .target = std::move(input),
+        };
+    }
+    case TaskKind::Linear2: {
+        std::normal_distribution<float> noise(0.0F, 0.08F);
+        const bool label = ((index + offset) % 2U) != 0U;
+        std::vector<float> input(state_dim, 0.0F);
+        input[0] = label ? 1.0F : -1.0F;
+        for (std::size_t i = 1; i < input.size(); ++i) {
+            input[i] = noise(rng);
+        }
+        if (range == VectorRange::Nonnegative) {
+            for (float& value : input) {
+                value = (value + 1.0F) * 0.5F;
+            }
+        }
+        normalize_l2(input);
+        return TaskSample{
+            .input = std::move(input),
+            .target = class_vector(state_dim, label ? 1 : 0, 2, range),
+            .label = label ? 1 : 0,
+            .class_count = 2,
+        };
+    }
+    case TaskKind::Basis4: {
+        const int label = static_cast<int>((index + offset) % 4U);
+        return TaskSample{
+            .input = basis_vector(state_dim, static_cast<std::size_t>(label)),
+            .target = class_vector(state_dim, label, 4, range),
+            .label = label,
+            .class_count = 4,
         };
     }
     case TaskKind::AlternatingBit: {
@@ -290,6 +398,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         };
     }
     case TaskKind::Mnist:
+    case TaskKind::Mnist01:
         break;
     }
     throw std::invalid_argument("unknown task kind");
@@ -311,6 +420,25 @@ TaskDataset make_mnist_dataset(const Config& model_config, const TaskConfig& tas
     append_mnist_split(dataset.test, root / "t10k-images-idx3-ubyte",
                        root / "t10k-labels-idx1-ubyte", task_config.test_samples,
                        model_config.state_dim, task_config.vector_range);
+    return dataset;
+}
+
+TaskDataset make_mnist_binary_dataset(const Config& model_config, const TaskConfig& task_config) {
+    if (model_config.state_dim < 786U) {
+        throw std::invalid_argument("mnist-01 task requires --state-dim 786 or larger");
+    }
+
+    const std::filesystem::path root(task_config.mnist_dir);
+    TaskDataset dataset{};
+    dataset.train.reserve(task_config.train_samples);
+    dataset.test.reserve(task_config.test_samples);
+
+    append_mnist_binary_split(dataset.train, root / "train-images-idx3-ubyte",
+                              root / "train-labels-idx1-ubyte", task_config.train_samples,
+                              model_config.state_dim, task_config.vector_range);
+    append_mnist_binary_split(dataset.test, root / "t10k-images-idx3-ubyte",
+                              root / "t10k-labels-idx1-ubyte", task_config.test_samples,
+                              model_config.state_dim, task_config.vector_range);
     return dataset;
 }
 
@@ -352,6 +480,17 @@ int predicted_class(std::span<const float> state, int class_count, std::size_t c
 void record_tick_diagnostics(const Tick& tick, LossPoint& loss) {
     loss.state_heat_l2 += tick.state_heat_l2;
     loss.op_heat_l2 += tick.op_heat_l2;
+    if (!tick.op_heat_l2_by_op.empty()) {
+        if (loss.op_heat_l2_by_op.empty()) {
+            loss.op_heat_l2_by_op.assign(tick.op_heat_l2_by_op.size(), 0.0F);
+        }
+        if (loss.op_heat_l2_by_op.size() != tick.op_heat_l2_by_op.size()) {
+            throw std::invalid_argument("op heat diagnostics size mismatch");
+        }
+        for (std::size_t op = 0; op < tick.op_heat_l2_by_op.size(); ++op) {
+            loss.op_heat_l2_by_op[op] += tick.op_heat_l2_by_op[op];
+        }
+    }
     if (tick.chosen_op < loss.op_selection_counts.size()) {
         ++loss.op_selection_counts[tick.chosen_op];
         ++loss.total_selections;
@@ -361,6 +500,17 @@ void record_tick_diagnostics(const Tick& tick, LossPoint& loss) {
 void record_train_result(const TrainResult& result, LossPoint& loss) {
     loss.learning_update_l2 += result.learning_update_l2;
     loss.updated_ops += result.updated_ops;
+    if (!result.op_update_l2_by_op.empty()) {
+        if (loss.op_train_l2_by_op.empty()) {
+            loss.op_train_l2_by_op.assign(result.op_update_l2_by_op.size(), 0.0F);
+        }
+        if (loss.op_train_l2_by_op.size() != result.op_update_l2_by_op.size()) {
+            throw std::invalid_argument("op train diagnostics size mismatch");
+        }
+        for (std::size_t op = 0; op < result.op_update_l2_by_op.size(); ++op) {
+            loss.op_train_l2_by_op[op] += result.op_update_l2_by_op[op];
+        }
+    }
 }
 
 void finalize_op_usage(LossPoint& loss) {
@@ -385,6 +535,19 @@ void finalize_op_usage(LossPoint& loss) {
     loss.selected_ops = selected_ops;
     loss.max_op_selections = max_op_selections;
     loss.op_selection_entropy = entropy;
+
+    for (std::size_t op = 0; op < loss.op_heat_l2_by_op.size(); ++op) {
+        if (loss.op_heat_l2_by_op[op] > loss.max_op_heat_l2) {
+            loss.max_op_heat_l2 = loss.op_heat_l2_by_op[op];
+            loss.max_op_heat_index = op;
+        }
+    }
+    for (std::size_t op = 0; op < loss.op_train_l2_by_op.size(); ++op) {
+        if (loss.op_train_l2_by_op[op] > loss.max_op_train_l2) {
+            loss.max_op_train_l2 = loss.op_train_l2_by_op[op];
+            loss.max_op_train_index = op;
+        }
+    }
 }
 
 } // namespace
@@ -411,6 +574,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.task == TaskKind::Mnist) {
         return make_mnist_dataset(model_config, task_config);
     }
+    if (task_config.task == TaskKind::Mnist01) {
+        return make_mnist_binary_dataset(model_config, task_config);
+    }
 
     std::mt19937 rng(task_config.seed);
     TaskDataset dataset{};
@@ -436,12 +602,18 @@ const char* task_name(TaskKind task) {
         return "copy-input";
     case TaskKind::DelayedCopy:
         return "delayed-copy";
+    case TaskKind::Linear2:
+        return "linear-2";
+    case TaskKind::Basis4:
+        return "basis-4";
     case TaskKind::AlternatingBit:
         return "alternating-bit";
     case TaskKind::Xor:
         return "xor";
     case TaskKind::SineNext:
         return "sine-next";
+    case TaskKind::Mnist01:
+        return "mnist-01";
     case TaskKind::Mnist:
         return "mnist";
     }
@@ -529,6 +701,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     std::size_t self_ticks = 0;
     LossPoint diagnostics{};
     diagnostics.op_selection_counts.assign(model.config().num_ops, 0U);
+    diagnostics.op_heat_l2_by_op.assign(model.config().num_ops, 0.0F);
+    diagnostics.op_train_l2_by_op.assign(model.config().num_ops, 0.0F);
 
     for (std::size_t order_index = 0; order_index < order.size(); ++order_index) {
         const TaskSample& sample = train_samples[order[order_index]];

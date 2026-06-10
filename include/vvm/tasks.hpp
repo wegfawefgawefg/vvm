@@ -18,9 +18,12 @@ enum class VectorRange {
 enum class TaskKind {
     CopyInput,
     DelayedCopy,
+    Linear2,
+    Basis4,
     AlternatingBit,
     Xor,
     SineNext,
+    Mnist01,
     Mnist,
 };
 
@@ -74,7 +77,13 @@ struct LossPoint {
     std::size_t selected_ops = 0;
     std::size_t total_selections = 0;
     std::size_t max_op_selections = 0;
+    std::size_t max_op_heat_index = 0;
+    std::size_t max_op_train_index = 0;
+    float max_op_heat_l2 = 0.0F;
+    float max_op_train_l2 = 0.0F;
     std::vector<std::size_t> op_selection_counts;
+    std::vector<float> op_heat_l2_by_op;
+    std::vector<float> op_train_l2_by_op;
 };
 
 [[nodiscard]] TaskDataset make_task_dataset(const Config& model_config,

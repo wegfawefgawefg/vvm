@@ -352,7 +352,12 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
     }
 
     const float op_heat = decayed(config_.op_heat_stddev, config_.heat_decay, clock);
-    const float op_heat_l2 = heat_op_bank(op_heat, rng);
+    std::vector<float> op_heat_l2_by_op = heat_op_bank(op_heat, rng);
+    float op_heat_l2_sq = 0.0F;
+    for (const float value : op_heat_l2_by_op) {
+        op_heat_l2_sq += value * value;
+    }
+    const float op_heat_l2 = std::sqrt(op_heat_l2_sq);
 
     std::vector<float> state_before(state.begin(), state.end());
     std::vector<float> working_state(state.begin(), state.end());
@@ -396,6 +401,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         .op_heat_stddev = op_heat,
         .state_heat_l2 = state_heat_l2,
         .op_heat_l2 = op_heat_l2,
+        .op_heat_l2_by_op = std::move(op_heat_l2_by_op),
     };
     apply_observation(tick_result, state, config_.curiosity_scale);
     return tick_result;
@@ -477,12 +483,14 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
 
     if (weight_sum <= 0.0F) {
         return TrainResult{
+            .op_update_l2_by_op = std::vector<float>(config_.num_ops, 0.0F),
             .tick_count = ticks.size(),
         };
     }
 
     std::size_t updated_ops = 0;
     float learning_update_norm_sq = 0.0F;
+    std::vector<float> op_update_l2_by_op(config_.num_ops, 0.0F);
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
         if (op_counts[op] == 0U) {
             continue;
@@ -516,10 +524,13 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
                 train_config.learning_rate * clip_scale * gradients[op_offset + i];
         }
         normalize_op(op);
+        float op_update_norm_sq = 0.0F;
         for (std::size_t i = 0; i < config_.state_dim; ++i) {
             const float delta = op_bank_[op_offset + i] - before[i];
             learning_update_norm_sq += delta * delta;
+            op_update_norm_sq += delta * delta;
         }
+        op_update_l2_by_op[op] = std::sqrt(op_update_norm_sq);
         ++updated_ops;
     }
 
@@ -527,21 +538,31 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         .loss = weighted_loss / weight_sum,
         .mean_prediction_error = error_sum / static_cast<float>(ticks.size()),
         .learning_update_l2 = std::sqrt(learning_update_norm_sq),
+        .op_update_l2_by_op = std::move(op_update_l2_by_op),
         .tick_count = ticks.size(),
         .updated_ops = updated_ops,
     };
 }
 
-float Model::heat_op_bank(float stddev, std::mt19937& rng) {
+std::vector<float> Model::heat_op_bank(float stddev, std::mt19937& rng) {
     if (stddev <= 0.0F) {
-        return 0.0F;
+        return {};
     }
 
-    const float heat_l2 = apply_heat(op_bank_, stddev, rng);
+    std::vector<float> heat_l2_by_op(config_.num_ops, 0.0F);
+    std::normal_distribution<float> noise(0.0F, stddev);
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
+        const std::size_t op_offset = op * config_.state_dim;
+        float op_heat_norm_sq = 0.0F;
+        for (std::size_t i = 0; i < config_.state_dim; ++i) {
+            const float delta = noise(rng);
+            op_bank_[op_offset + i] += delta;
+            op_heat_norm_sq += delta * delta;
+        }
+        heat_l2_by_op[op] = std::sqrt(op_heat_norm_sq);
         normalize_op(op);
     }
-    return heat_l2;
+    return heat_l2_by_op;
 }
 
 void Model::normalize_op(std::size_t op) {

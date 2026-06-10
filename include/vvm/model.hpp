@@ -69,6 +69,7 @@ struct Tick {
     float op_heat_stddev = 0.0F;
     float state_heat_l2 = 0.0F;
     float op_heat_l2 = 0.0F;
+    std::vector<float> op_heat_l2_by_op;
 };
 
 struct StepTrace {
@@ -101,6 +102,7 @@ struct TrainResult {
     float loss = 0.0F;
     float mean_prediction_error = 0.0F;
     float learning_update_l2 = 0.0F;
+    std::vector<float> op_update_l2_by_op;
     std::size_t tick_count = 0;
     std::size_t updated_ops = 0;
 };
@@ -150,7 +152,7 @@ class Model {
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state) const;
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state,
                                                         std::mt19937& rng) const;
-    [[nodiscard]] float heat_op_bank(float stddev, std::mt19937& rng);
+    [[nodiscard]] std::vector<float> heat_op_bank(float stddev, std::mt19937& rng);
     void normalize_op(std::size_t op);
 
     Config config_;
