@@ -246,7 +246,7 @@ void draw_probe(SDL_Renderer* renderer, const Model& model, const TaskDataset& d
     const float panel_scale = std::max(
         4.0F, std::min(static_cast<float>(width) / 145.0F, static_cast<float>(height) / 58.0F));
     const float image_size = 28.0F * panel_scale;
-    const float top = 118.0F;
+    const float top = 150.0F;
     const float gap = 28.0F;
     const float left = 28.0F;
 
@@ -316,19 +316,27 @@ void draw_probe(SDL_Renderer* renderer, const Model& model, const TaskDataset& d
         std::snprintf(route, sizeof(route), "op=none");
     }
 
-    char overlay[1280];
-    std::snprintf(
-        overlay, sizeof(overlay),
-        "sample=%zu/%zu  label=%d  tick=%zu  mode=%s  input=%s  ticks/frame=%zu\n"
-        "%s\n"
-        "%s\n"
-        "keys: space pause | . step | i input | n/p sample | 0/1 jump | r reset | +/- clock | "
-        "q quit\n"
-        "params=%zu  ops=%zu  d=%zu  state_white=%.5f",
-        sample_index, dataset.test.size(), sample.label, tick_count, paused ? "paused" : "running",
-        input_enabled ? "on" : "off", ticks_per_frame, route, candidates, model.parameter_count(),
-        model.config().num_ops, model.config().state_dim, static_cast<double>(state_white));
-    draw_text(renderer, 14, overlay, 20.0F, 16.0F, SDL_Color{235, 240, 245, 255});
+    char line0[256];
+    char line3[256];
+    char line4[256];
+    std::snprintf(line0, sizeof(line0),
+                  "sample=%zu/%zu  label=%d  tick=%zu  mode=%s  input=%s  ticks/frame=%zu",
+                  sample_index, dataset.test.size(), sample.label, tick_count,
+                  paused ? "paused" : "running", input_enabled ? "on" : "off", ticks_per_frame);
+    std::snprintf(line3, sizeof(line3),
+                  "keys: space pause | . step | i input | n/p sample | 0/1 jump | r reset");
+    std::snprintf(line4, sizeof(line4),
+                  "keys: +/- clock | q quit    params=%zu ops=%zu d=%zu "
+                  "state_white=%.5f",
+                  model.parameter_count(), model.config().num_ops, model.config().state_dim,
+                  static_cast<double>(state_white));
+
+    const SDL_Color text_color{235, 240, 245, 255};
+    draw_text(renderer, 12, line0, 16.0F, 14.0F, text_color);
+    draw_text(renderer, 12, route, 16.0F, 34.0F, text_color);
+    draw_text(renderer, 12, candidates, 16.0F, 54.0F, text_color);
+    draw_text(renderer, 12, line3, 16.0F, 74.0F, text_color);
+    draw_text(renderer, 12, line4, 16.0F, 94.0F, text_color);
 }
 
 std::size_t find_next_label(std::span<const TaskSample> samples, std::size_t start, int label) {
