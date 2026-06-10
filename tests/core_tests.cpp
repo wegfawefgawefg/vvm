@@ -89,6 +89,23 @@ void test_retrieval_temperature_sharpens_candidate_weights() {
     assert(candidate_entropy(softmax_tick) < candidate_entropy(linear_tick));
 }
 
+void test_sample_candidate_count_caps_sampled_rank() {
+    vvm::Config config{};
+    config.state_dim = 16;
+    config.num_ops = 32;
+    config.candidate_count = 8;
+    config.sample_candidate_count = 1;
+    config.sample_retrieval = true;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    const vvm::Tick tick = model.tick(state, rng, 0);
+
+    assert(!tick.candidate_indices.empty());
+    assert(tick.chosen_op == tick.candidate_indices.front());
+}
+
 void test_prediction_error() {
     const float predicted[] = {1.0F, 0.0F};
     const float observed[] = {0.0F, 1.0F};
@@ -739,6 +756,7 @@ int main() {
     test_dot_product();
     test_run_shape();
     test_retrieval_temperature_sharpens_candidate_weights();
+    test_sample_candidate_count_caps_sampled_rank();
     test_prediction_error();
     test_activation_modes_tick();
     test_heat_creates_curiosity();

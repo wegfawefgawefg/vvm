@@ -186,6 +186,10 @@ Tuning notes:
   already-dominant routes stickier.
 - `--retrieval-temperature 0` uses the default linear top-k sampling weights;
   positive values use score softmax over the top-k set.
+- `--sample-candidates N` caps stochastic training retrieval to the first `N`
+  ranked candidates while still computing the full candidate set. `0` keeps the
+  default of sampling across all candidates. This tests training/eval retrieval
+  mismatch without changing greedy evaluation.
 - `--lr-decay` reduces learning rate by epoch.
 - `--momentum` enables optimizer momentum over op-bank updates.
 - `--rejection-decay` reduces rejection pressure by epoch.
@@ -339,6 +343,14 @@ while `chosen_gap` stayed around `0.126-0.131`. So average nearest-op boundaries
 are not razor-thin, but training does often update non-best sampled ops while
 evaluation uses greedy top-1. That points the next probe toward training/eval
 retrieval mismatch rather than just raw top-1 boundary fragility.
+
+Sampling-rank caps reduce that mismatch but also reduce route diversity. On the
+same `mnist-01` run, `--sample-candidates 4` lowered `chosen_gap` to about
+`0.07` but selected only about `120/256` ops and peaked around `84.6%`.
+`--sample-candidates 8` and `12` recovered the `85.7%` peak but still selected
+fewer ops and did not beat sampling across all 16 candidates. The stochastic tail
+appears to help keep the op bank broad enough, even though it increases
+train/eval mismatch.
 
 Current deterministic-eval MNIST-01 probes show an important drift pattern:
 useful class behavior appears early, then continued training can reduce

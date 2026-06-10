@@ -346,6 +346,18 @@ meaning sampled training often updates ops below the greedy best candidate. The
 next retrieval-side suspect is therefore train/eval sampling mismatch, not just
 fragile nearest-neighbor margins.
 
+Sampling-rank caps can be tested with:
+
+```text
+--sample-candidates N
+```
+
+`0` means sample across all candidates. `4` reduced `chosen_gap` to about `0.07`
+but collapsed route diversity to roughly `120/256` selected ops and peaked near
+`84.6%`. `8` and `12` recovered the `85.7%` peak but did not improve past the
+default all-16 sampler. This suggests the stochastic tail is not just noise; it
+helps keep routes broad enough for the current setup.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

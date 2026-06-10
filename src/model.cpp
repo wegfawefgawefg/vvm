@@ -147,6 +147,9 @@ Model::Model(Config config) : config_(config) {
     if (config_.candidate_count == 0U || config_.candidate_count > config_.num_ops) {
         throw std::invalid_argument("candidate_count must be in [1, num_ops]");
     }
+    if (config_.sample_candidate_count > config_.candidate_count) {
+        throw std::invalid_argument("sample_candidate_count must be <= candidate_count");
+    }
     if (config_.update_scale < 0.0F) {
         throw std::invalid_argument("update_scale must be nonnegative");
     }
@@ -380,8 +383,14 @@ Model::Prediction Model::predict_from_working_state(std::span<const float> worki
 Model::Prediction Model::predict_from_working_state(std::span<const float> working_state,
                                                     std::mt19937& rng) const {
     Retrieval retrieval = retrieve(working_state);
+    const std::size_t sample_count = config_.sample_candidate_count == 0U
+                                         ? retrieval.candidate_weights.size()
+                                         : config_.sample_candidate_count;
     const std::size_t chosen_rank =
-        config_.sample_retrieval ? sample_weighted(retrieval.candidate_weights, rng) : 0U;
+        config_.sample_retrieval
+            ? sample_weighted(
+                  std::span<const float>(retrieval.candidate_weights.data(), sample_count), rng)
+            : 0U;
     retrieval.chosen_index = retrieval.candidate_indices[chosen_rank];
     retrieval.chosen_score = dot_product(
         working_state,

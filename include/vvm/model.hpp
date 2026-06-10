@@ -19,6 +19,7 @@ struct Config {
     std::size_t state_dim = 256;
     std::size_t num_ops = 1024;
     std::size_t candidate_count = 8;
+    std::size_t sample_candidate_count = 0;
     std::size_t steps = 8;
     ActivationKind activation = ActivationKind::Deadzone;
     float update_scale = 1.0F;

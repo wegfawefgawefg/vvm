@@ -43,12 +43,13 @@ void print_usage() {
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--activation deadzone] [--update-scale F] "
                  "[--retrieval-temperature F] [--state-heat F] [--op-heat F] "
-                 "[--heat-decay F] [--hard-retrieval]\n"
+                 "[--heat-decay F] [--sample-candidates N] [--hard-retrieval]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
                  "[--idle-frames N] [--window N] [--train-interval N] "
+                 "[--sample-candidates N] "
                  "[--class-start-frame N] [--class-ramp-frames N] "
                  "[--class-registers N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
@@ -252,6 +253,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--candidates" || arg == "--top-k") {
             if (!parse_size(value, config.candidate_count)) {
+                return false;
+            }
+        } else if (arg == "--sample-candidates") {
+            if (!parse_size(value, config.sample_candidate_count)) {
                 return false;
             }
         } else if (arg == "--update-scale") {
@@ -670,6 +675,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " test_samples=" << dataset.test.size()
               << " activation=" << activation_name(config.activation)
               << " retrieval_temperature=" << config.retrieval_temperature
+              << " sample_candidates=" << config.sample_candidate_count
               << " vectors=" << vector_range_name(task_config.vector_range)
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
