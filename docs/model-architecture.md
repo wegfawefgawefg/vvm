@@ -367,17 +367,37 @@ Use:
 
 Repeated chosen-op hits in one window can otherwise over-update a single vector.
 
-## PPO/RL Lessons To Keep
+## Core RL Machinery
 
-We are not implementing PPO in v0, but the useful lessons are:
+The goal is to take the useful core from actor-critic, PPO, and DQN without
+inheriting their usual network shapes.
+
+The useful actor-critic/PPO core:
 
 - train from finite rollout windows
 - store old chosen probabilities
-- compute reward-to-go / advantage
-- do not let policy changes be too violent
+- compute bootstrapped reward-to-go
+- compute advantage
 - use value for delayed credit assignment
+- keep policy updates bounded enough that the running machine is not jolted
 
-Future candidate-policy update:
+The useful DQN core:
+
+- estimate future return for available choices
+- use bootstrapped targets
+- separate immediate reward from expected future reward
+- compare candidate actions/ops through a value-like score
+
+For VVM, the candidate set is the action surface:
+
+```text
+state -> candidate ops -> chosen op
+```
+
+The actor part is the chosen-op sampler. The critic/value part predicts future
+reward from state, and later may also score candidate ops.
+
+Candidate-policy update:
 
 ```text
 advantage_t = G_t - V(S_t)
@@ -385,12 +405,22 @@ if advantage_t > 0: make chosen op more likely
 if advantage_t < 0: make chosen op less likely
 ```
 
-If that becomes unstable, add a PPO-like probability ratio clip:
+Use the PPO stability lesson directly when updating candidate probabilities:
 
 ```text
 ratio = new_prob(chosen) / old_prob(chosen)
 ratio_clipped = clamp(ratio, 1 - eps, 1 + eps)
 ```
+
+Use the DQN lesson when scoring candidates:
+
+```text
+Q(S_t, candidate_op_i) ~= expected return after choosing candidate_op_i
+chosen = sample_or_argmax(Q over candidate set)
+```
+
+This does not require a conventional DQN architecture. It only requires a
+bootstrapped value target over the candidate choices available to VVM.
 
 ## Implementation Order
 
