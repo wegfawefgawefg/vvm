@@ -255,6 +255,34 @@ void test_toy_training_runs() {
     assert(loss.test_loss >= 0.0F);
 }
 
+void test_delayed_copy_training_runs() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 32;
+    config.candidate_count = 4;
+
+    vvm::ToyTaskConfig task_config{};
+    task_config.task = vvm::ToyTaskKind::DelayedCopy;
+    task_config.train_samples = 8;
+    task_config.test_samples = 4;
+    task_config.frames_per_sample = 4;
+    task_config.idle_frames_between_samples = 4;
+    task_config.window_size = 4;
+    task_config.learning_rate = 0.05F;
+
+    vvm::Model model(config);
+    const vvm::ToyDataset dataset = vvm::make_toy_dataset(config, task_config);
+    const vvm::LossPoint loss =
+        vvm::train_toy_epoch(model, dataset.train, dataset.test, task_config, 0);
+
+    assert(std::isfinite(loss.train_loss));
+    assert(std::isfinite(loss.self_loss));
+    assert(std::isfinite(loss.test_loss));
+    assert(loss.train_loss >= 0.0F);
+    assert(loss.self_loss >= 0.0F);
+    assert(loss.test_loss >= 0.0F);
+}
+
 void test_invalid_config() {
     vvm::Config config{};
     config.num_ops = 2;
@@ -282,6 +310,7 @@ int main() {
     test_rejection_lowers_bad_op_affinity();
     test_observation_creates_curiosity_without_heat();
     test_toy_training_runs();
+    test_delayed_copy_training_runs();
     test_invalid_config();
 
     std::cout << "vvm core tests passed\n";

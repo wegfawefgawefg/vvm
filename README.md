@@ -37,11 +37,12 @@ cmake --build --preset dev-sdl3
 ./build/vvm run --steps 8 --state-dim 256 --ops 1024 --candidates 8 --update-scale 1.0
 ./build/vvm run --steps 8 --state-heat 0.01 --op-heat 0.001 --heat-decay 0.999
 ./build/vvm train-toy --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
+./build/vvm bench-tiny --epochs 50 --state-dim 16 --ops 64 --candidates 4 --train-samples 16 --test-samples 8 --sample-frames 8 --window 8 --lr 0.1
 ./build-sdl3/vvm visualize --steps 256
 ./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
 ```
 
-`smoke`, `run`, and `train-toy` are headless. `visualize` and
+`smoke`, `run`, `train-toy`, and `bench-tiny` are headless. `visualize` and
 `visualize-train` require `VVM_BUILD_VISUALIZER=ON` and SDL3.
 
 The first toy task is `copy-input`: a nonnegative input vector is shown for

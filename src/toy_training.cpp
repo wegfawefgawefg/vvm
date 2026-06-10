@@ -43,6 +43,11 @@ float run_sample_loss(Model& model, const ToySample& sample, const ToyTaskConfig
     for (std::size_t frame = 0; frame < task_config.frames_per_sample; ++frame) {
         (void)model.tick(state, rng, clock + frame, sample.input);
     }
+    if (task_config.task == ToyTaskKind::DelayedCopy) {
+        for (std::size_t frame = 0; frame < task_config.idle_frames_between_samples; ++frame) {
+            (void)model.tick(state, rng, clock + task_config.frames_per_sample + frame);
+        }
+    }
     return Model::prediction_error(state, sample.target);
 }
 
@@ -83,6 +88,16 @@ ToyDataset make_toy_dataset(const Config& model_config, const ToyTaskConfig& tas
     append_samples(dataset.train, task_config.train_samples);
     append_samples(dataset.test, task_config.test_samples);
     return dataset;
+}
+
+const char* toy_task_name(ToyTaskKind task) {
+    switch (task) {
+    case ToyTaskKind::CopyInput:
+        return "copy-input";
+    case ToyTaskKind::DelayedCopy:
+        return "delayed-copy";
+    }
+    return "unknown";
 }
 
 float evaluate_toy_loss(Model& model, std::span<const ToySample> samples,
@@ -161,6 +176,9 @@ LossPoint train_toy_epoch(Model& model, std::span<const ToySample> train_samples
                  (task_config.frames_per_sample + task_config.idle_frames_between_samples)) +
                 task_config.frames_per_sample + frame;
             Tick tick = model.tick(state, rng, clock);
+            if (task_config.task == ToyTaskKind::DelayedCopy) {
+                apply_observation(tick, sample.target, model.config().curiosity_scale);
+            }
 
             self_loss_sum += tick.prediction_error;
             ++self_ticks;

@@ -9,6 +9,11 @@
 
 namespace vvm {
 
+enum class ToyTaskKind {
+    CopyInput,
+    DelayedCopy,
+};
+
 struct ToySample {
     std::vector<float> input;
     std::vector<float> target;
@@ -20,6 +25,7 @@ struct ToyDataset {
 };
 
 struct ToyTaskConfig {
+    ToyTaskKind task = ToyTaskKind::CopyInput;
     std::size_t train_samples = 64;
     std::size_t test_samples = 32;
     std::size_t frames_per_sample = 8;
@@ -41,6 +47,7 @@ struct LossPoint {
 
 [[nodiscard]] ToyDataset make_toy_dataset(const Config& model_config,
                                           const ToyTaskConfig& task_config);
+[[nodiscard]] const char* toy_task_name(ToyTaskKind task);
 [[nodiscard]] float evaluate_toy_loss(Model& model, std::span<const ToySample> samples,
                                       const ToyTaskConfig& task_config);
 [[nodiscard]] LossPoint train_toy_epoch(Model& model, std::span<const ToySample> train_samples,
