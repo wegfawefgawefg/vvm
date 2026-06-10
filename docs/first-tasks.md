@@ -174,6 +174,19 @@ Purpose:
 - tests scaling from tiny visual data
 - lets us compare against trivial linear/MLP baselines
 
+Current repo support:
+
+```sh
+./scripts/fetch_mnist.sh
+./build/vvm train-task --task mnist --state-dim 784 --ops 2048 --candidates 8 \
+  --train-samples 512 --test-samples 128 --sample-frames 8 --window 8 \
+  --epochs 10 --lr 0.05
+```
+
+This first version is VVM-native rather than a standard classifier head: the
+image is embedded into state, and the target digit is encoded as a full-state
+class prototype. Exact `test_accuracy` is reported by matching those prototypes.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:

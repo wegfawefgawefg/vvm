@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace vvm {
@@ -20,11 +21,14 @@ enum class TaskKind {
     AlternatingBit,
     Xor,
     SineNext,
+    Mnist,
 };
 
 struct TaskSample {
     std::vector<float> input;
     std::vector<float> target;
+    int label = -1;
+    int class_count = 0;
 };
 
 struct TaskDataset {
@@ -45,18 +49,29 @@ struct TaskConfig {
     float rejection_scale = 0.0F;
     float rejection_threshold = 0.02F;
     VectorRange vector_range = VectorRange::Signed;
+    std::string mnist_dir = "resources/mnist";
     std::uint32_t seed = 0x51A7E5U;
+};
+
+struct EvalMetrics {
+    float loss = 0.0F;
+    float accuracy = 0.0F;
+    std::size_t accuracy_samples = 0;
 };
 
 struct LossPoint {
     float train_loss = 0.0F;
     float self_loss = 0.0F;
     float test_loss = 0.0F;
+    float test_accuracy = 0.0F;
+    std::size_t accuracy_samples = 0;
 };
 
 [[nodiscard]] TaskDataset make_task_dataset(const Config& model_config,
                                             const TaskConfig& task_config);
 [[nodiscard]] const char* task_name(TaskKind task);
+[[nodiscard]] EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samples,
+                                                const TaskConfig& task_config);
 [[nodiscard]] float evaluate_task_loss(Model& model, std::span<const TaskSample> samples,
                                        const TaskConfig& task_config);
 [[nodiscard]] LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_samples,

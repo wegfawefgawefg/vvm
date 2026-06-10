@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <iostream>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -27,9 +28,9 @@ void print_usage() {
                  "[--activation deadzone] [--update-scale F] "
                  "[--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
-                 "[--task copy-input|delayed-copy|alternating-bit|xor|sine-next] "
-                 "[--vectors signed|nonnegative] [--sample-frames N] [--idle-frames N] "
-                 "[--window N] [--lr F]\n"
+                 "[--task copy-input|delayed-copy|alternating-bit|xor|sine-next|mnist] "
+                 "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
+                 "[--idle-frames N] [--window N] [--lr F]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
@@ -73,6 +74,10 @@ bool parse_task(std::string_view value, vvm::TaskKind& out) {
     }
     if (value == "sine-next" || value == "sine") {
         out = vvm::TaskKind::SineNext;
+        return true;
+    }
+    if (value == "mnist") {
+        out = vvm::TaskKind::Mnist;
         return true;
     }
     return false;
@@ -156,6 +161,8 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_vector_range(value, task_config.vector_range)) {
                 return false;
             }
+        } else if (arg == "--mnist-dir") {
+            task_config.mnist_dir = std::string(value);
         } else if (arg == "--steps") {
             if (!parse_size(value, config.steps)) {
                 return false;
@@ -302,7 +309,11 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         const vvm::LossPoint loss =
             vvm::train_task_epoch(model, dataset.train, dataset.test, task_config, epoch);
         std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << loss.train_loss
-                  << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss << '\n';
+                  << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss;
+        if (loss.accuracy_samples > 0U) {
+            std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
+        }
+        std::cout << '\n';
     }
     return 0;
 }
@@ -337,7 +348,8 @@ int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, st
 
         vvm::Model model(config);
         const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
-        const float initial_test = vvm::evaluate_task_loss(model, dataset.test, task_config);
+        const vvm::EvalMetrics initial_metrics =
+            vvm::evaluate_task_metrics(model, dataset.test, task_config);
 
         const auto begin = std::chrono::steady_clock::now();
         vvm::LossPoint loss{};
@@ -352,12 +364,16 @@ int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, st
         const std::size_t train_ticks = ticks_per_epoch * epochs;
         const double tick_rate = seconds > 0.0 ? static_cast<double>(train_ticks) / seconds : 0.0;
         const double epoch_rate = seconds > 0.0 ? static_cast<double>(epochs) / seconds : 0.0;
-        const float improvement = initial_test - loss.test_loss;
+        const float improvement = initial_metrics.loss - loss.test_loss;
 
-        std::cout << "task=" << vvm::task_name(task_config.task) << " initial_test=" << initial_test
-                  << " final_train=" << loss.train_loss << " final_self=" << loss.self_loss
-                  << " final_test=" << loss.test_loss << " improvement=" << improvement
-                  << " seconds=" << seconds << " train_ticks=" << train_ticks
+        std::cout << "task=" << vvm::task_name(task_config.task)
+                  << " initial_test=" << initial_metrics.loss << " final_train=" << loss.train_loss
+                  << " final_self=" << loss.self_loss << " final_test=" << loss.test_loss
+                  << " improvement=" << improvement;
+        if (loss.accuracy_samples > 0U) {
+            std::cout << " final_accuracy=" << (100.0F * loss.test_accuracy) << "%";
+        }
+        std::cout << " seconds=" << seconds << " train_ticks=" << train_ticks
                   << " tick_rate=" << tick_rate << " epoch_rate=" << epoch_rate << '\n';
     }
 

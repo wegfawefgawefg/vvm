@@ -43,6 +43,7 @@ venv/
 runs/
 checkpoints/
 datasets/
+resources/mnist/
 logs/
 *.pt
 *.pth

@@ -38,6 +38,8 @@ cmake --build --preset dev-sdl3
 ./build/vvm run --steps 8 --state-heat 0.01 --op-heat 0.001 --heat-decay 0.999
 ./build/vvm train-task --task copy-input --activation deadzone --vectors signed --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
 ./build/vvm bench-tasks --activation deadzone --vectors signed --epochs 50 --state-dim 16 --ops 64 --candidates 4 --train-samples 16 --test-samples 8 --sample-frames 8 --window 8 --lr 0.1
+./scripts/fetch_mnist.sh
+./build/vvm train-task --task mnist --state-dim 784 --ops 2048 --candidates 8 --train-samples 512 --test-samples 128 --sample-frames 8 --window 8 --epochs 10 --lr 0.05
 ./build-sdl3/vvm visualize --steps 256
 ./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
 ```
@@ -58,13 +60,19 @@ per task. `--vectors signed|nonnegative` is also available for baseline
 comparison.
 
 Current generated tasks are `copy-input`, `delayed-copy`, `alternating-bit`,
-`xor`, and `sine-next`. `copy-input` shows an input vector for
+`xor`, and `sine-next`. MNIST is available as `--task mnist` after running
+`scripts/fetch_mnist.sh`; the data is stored under ignored `resources/mnist/`.
+`copy-input` shows an input vector for
 `--sample-frames` ticks and trains state toward that same vector. `delayed-copy`
 keeps ticking with no input for `--idle-frames` and then trains state toward the
 original vector. Other idle ticks train on the model's own observed next state
 as a self-prediction signal. `--rejection-scale` adds a weak local repulsion
 from high-loss query/op matches, so failed ops stop monopolizing the same region
 of state space.
+
+MNIST v0 maps each 28x28 image into the first 784 state dimensions and trains
+state toward a 10-way digit target encoded as full-state class prototypes. The
+CLI reports exact `test_accuracy` for class-like tasks.
 
 ## Layout
 

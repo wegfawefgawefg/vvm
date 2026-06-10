@@ -1,10 +1,17 @@
 #include "vvm/tasks.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <ios>
+#include <limits>
 #include <random>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace vvm {
@@ -46,6 +53,27 @@ std::vector<float> random_signed_unit(std::size_t size, std::mt19937& rng) {
 std::vector<float> basis_vector(std::size_t size, std::size_t index) {
     std::vector<float> values(size, 0.0F);
     values[index % size] = 1.0F;
+    return values;
+}
+
+std::vector<float> class_vector(std::size_t size, int label, int class_count, VectorRange range) {
+    if (label < 0 || class_count <= 0 || label >= class_count) {
+        throw std::invalid_argument("invalid class target");
+    }
+
+    std::vector<float> values(size, 0.0F);
+    if (range == VectorRange::Signed) {
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            values[i] =
+                static_cast<int>(i % static_cast<std::size_t>(class_count)) == label ? 1.0F : -1.0F;
+        }
+    } else {
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            values[i] =
+                static_cast<int>(i % static_cast<std::size_t>(class_count)) == label ? 1.0F : 0.0F;
+        }
+    }
+    normalize_l2(values);
     return values;
 }
 
@@ -109,6 +137,84 @@ std::vector<float> sine_phase_vector(std::size_t size, float phase, VectorRange 
     return values;
 }
 
+std::uint32_t read_be_u32(std::istream& stream, const std::filesystem::path& path) {
+    unsigned char bytes[4] = {};
+    stream.read(reinterpret_cast<char*>(bytes), sizeof(bytes));
+    if (!stream) {
+        throw std::runtime_error("failed to read IDX header from " + path.string());
+    }
+    return (static_cast<std::uint32_t>(bytes[0]) << 24U) |
+           (static_cast<std::uint32_t>(bytes[1]) << 16U) |
+           (static_cast<std::uint32_t>(bytes[2]) << 8U) | static_cast<std::uint32_t>(bytes[3]);
+}
+
+std::ifstream open_binary(const std::filesystem::path& path) {
+    std::ifstream stream(path, std::ios::binary);
+    if (!stream) {
+        throw std::runtime_error("failed to open " + path.string());
+    }
+    return stream;
+}
+
+TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigned char label,
+                             std::size_t state_dim, VectorRange range) {
+    if (state_dim < 784U) {
+        throw std::invalid_argument("mnist task requires state_dim >= 784");
+    }
+
+    std::vector<float> input(state_dim, 0.0F);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+        input[i] = static_cast<float>(pixels[i]) / 255.0F;
+    }
+    normalize_l2(input);
+
+    return TaskSample{
+        .input = std::move(input),
+        .target = class_vector(state_dim, static_cast<int>(label), 10, range),
+        .label = static_cast<int>(label),
+        .class_count = 10,
+    };
+}
+
+void append_mnist_split(std::vector<TaskSample>& samples, const std::filesystem::path& images_path,
+                        const std::filesystem::path& labels_path, std::size_t requested_count,
+                        std::size_t state_dim, VectorRange range) {
+    std::ifstream images = open_binary(images_path);
+    std::ifstream labels = open_binary(labels_path);
+
+    const std::uint32_t image_magic = read_be_u32(images, images_path);
+    const std::uint32_t image_count = read_be_u32(images, images_path);
+    const std::uint32_t rows = read_be_u32(images, images_path);
+    const std::uint32_t cols = read_be_u32(images, images_path);
+
+    const std::uint32_t label_magic = read_be_u32(labels, labels_path);
+    const std::uint32_t label_count = read_be_u32(labels, labels_path);
+
+    if (image_magic != 2051U || label_magic != 2049U || rows != 28U || cols != 28U ||
+        image_count != label_count) {
+        throw std::runtime_error("invalid MNIST IDX files in " +
+                                 images_path.parent_path().string());
+    }
+
+    const std::size_t count =
+        std::min<std::size_t>(requested_count, static_cast<std::size_t>(image_count));
+    std::array<unsigned char, 784> pixels = {};
+    for (std::size_t i = 0; i < count; ++i) {
+        unsigned char label = 0;
+        images.read(reinterpret_cast<char*>(pixels.data()),
+                    static_cast<std::streamsize>(pixels.size()));
+        labels.read(reinterpret_cast<char*>(&label), 1);
+        if (!images || !labels) {
+            throw std::runtime_error("truncated MNIST IDX files in " +
+                                     images_path.parent_path().string());
+        }
+        if (label >= 10U) {
+            throw std::runtime_error("invalid MNIST label in " + labels_path.string());
+        }
+        samples.push_back(make_mnist_sample(pixels, label, state_dim, range));
+    }
+}
+
 TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t index,
                        std::size_t offset, VectorRange range, std::mt19937& rng) {
     const std::size_t state_dim = model_config.state_dim;
@@ -136,6 +242,8 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = bit_vector(state_dim, bit, range),
             .target = bit_vector(state_dim, !bit, range),
+            .label = !bit ? 1 : 0,
+            .class_count = 2,
         };
     }
     case TaskKind::Xor: {
@@ -145,6 +253,8 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         return TaskSample{
             .input = binary_pair_vector(state_dim, first, second, range),
             .target = bit_vector(state_dim, first != second, range),
+            .label = first != second ? 1 : 0,
+            .class_count = 2,
         };
     }
     case TaskKind::SineNext: {
@@ -159,8 +269,29 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
             .target = sine_phase_vector(state_dim, next_phase, range),
         };
     }
+    case TaskKind::Mnist:
+        break;
     }
     throw std::invalid_argument("unknown task kind");
+}
+
+TaskDataset make_mnist_dataset(const Config& model_config, const TaskConfig& task_config) {
+    if (model_config.state_dim < 784U) {
+        throw std::invalid_argument("mnist task requires --state-dim 784 or larger");
+    }
+
+    const std::filesystem::path root(task_config.mnist_dir);
+    TaskDataset dataset{};
+    dataset.train.reserve(task_config.train_samples);
+    dataset.test.reserve(task_config.test_samples);
+
+    append_mnist_split(dataset.train, root / "train-images-idx3-ubyte",
+                       root / "train-labels-idx1-ubyte", task_config.train_samples,
+                       model_config.state_dim, task_config.vector_range);
+    append_mnist_split(dataset.test, root / "t10k-images-idx3-ubyte",
+                       root / "t10k-labels-idx1-ubyte", task_config.test_samples,
+                       model_config.state_dim, task_config.vector_range);
+    return dataset;
 }
 
 void validate_sample(const TaskSample& sample, std::size_t state_dim) {
@@ -169,18 +300,30 @@ void validate_sample(const TaskSample& sample, std::size_t state_dim) {
     }
 }
 
-float run_sample_loss(Model& model, const TaskSample& sample, const TaskConfig& task_config,
-                      std::mt19937& rng, std::size_t clock) {
-    std::vector<float> state = neutral_state(model.config().state_dim);
-    for (std::size_t frame = 0; frame < task_config.frames_per_sample; ++frame) {
-        (void)model.tick(state, rng, clock + frame, sample.input);
+int predicted_class(std::span<const float> state, int class_count, VectorRange range) {
+    if (class_count <= 0 || static_cast<std::size_t>(class_count) > state.size()) {
+        throw std::invalid_argument("invalid class count");
     }
-    if (task_config.task == TaskKind::DelayedCopy) {
-        for (std::size_t frame = 0; frame < task_config.idle_frames_between_samples; ++frame) {
-            (void)model.tick(state, rng, clock + task_config.frames_per_sample + frame);
+
+    int best = 0;
+    float best_score = -std::numeric_limits<float>::infinity();
+    for (int candidate = 0; candidate < class_count; ++candidate) {
+        float score = 0.0F;
+        for (std::size_t i = 0; i < state.size(); ++i) {
+            const bool matches =
+                static_cast<int>(i % static_cast<std::size_t>(class_count)) == candidate;
+            if (range == VectorRange::Signed) {
+                score += state[i] * (matches ? 1.0F : -1.0F);
+            } else if (matches) {
+                score += state[i];
+            }
+        }
+        if (score > best_score) {
+            best = candidate;
+            best_score = score;
         }
     }
-    return Model::prediction_error(state, sample.target);
+    return best;
 }
 
 } // namespace
@@ -203,6 +346,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     }
     if (model_config.state_dim == 0U) {
         throw std::invalid_argument("state_dim must be nonzero");
+    }
+    if (task_config.task == TaskKind::Mnist) {
+        return make_mnist_dataset(model_config, task_config);
     }
 
     std::mt19937 rng(task_config.seed);
@@ -235,32 +381,69 @@ const char* task_name(TaskKind task) {
         return "xor";
     case TaskKind::SineNext:
         return "sine-next";
+    case TaskKind::Mnist:
+        return "mnist";
     }
     return "unknown";
 }
 
-float evaluate_task_loss(Model& model, std::span<const TaskSample> samples,
-                         const TaskConfig& task_config) {
+EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samples,
+                                  const TaskConfig& task_config) {
     if (samples.empty()) {
-        return 0.0F;
+        return EvalMetrics{};
     }
 
     std::mt19937 rng(task_config.seed ^ 0xBADC0DEU);
     float loss_sum = 0.0F;
+    std::size_t correct = 0;
+    std::size_t accuracy_samples = 0;
     for (std::size_t i = 0; i < samples.size(); ++i) {
         validate_sample(samples[i], model.config().state_dim);
-        loss_sum +=
-            run_sample_loss(model, samples[i], task_config, rng, i * task_config.frames_per_sample);
+        std::vector<float> state = neutral_state(model.config().state_dim);
+        for (std::size_t frame = 0; frame < task_config.frames_per_sample; ++frame) {
+            (void)model.tick(state, rng, (i * task_config.frames_per_sample) + frame,
+                             samples[i].input);
+        }
+        if (task_config.task == TaskKind::DelayedCopy) {
+            for (std::size_t frame = 0; frame < task_config.idle_frames_between_samples; ++frame) {
+                (void)model.tick(state, rng,
+                                 (i * task_config.frames_per_sample) +
+                                     task_config.frames_per_sample + frame);
+            }
+        }
+
+        loss_sum += Model::prediction_error(state, samples[i].target);
+        if (samples[i].label >= 0 && samples[i].class_count > 0) {
+            correct += predicted_class(state, samples[i].class_count, task_config.vector_range) ==
+                               samples[i].label
+                           ? 1U
+                           : 0U;
+            ++accuracy_samples;
+        }
     }
-    return loss_sum / static_cast<float>(samples.size());
+    return EvalMetrics{
+        .loss = loss_sum / static_cast<float>(samples.size()),
+        .accuracy = accuracy_samples == 0U
+                        ? 0.0F
+                        : static_cast<float>(correct) / static_cast<float>(accuracy_samples),
+        .accuracy_samples = accuracy_samples,
+    };
+}
+
+float evaluate_task_loss(Model& model, std::span<const TaskSample> samples,
+                         const TaskConfig& task_config) {
+    return evaluate_task_metrics(model, samples, task_config).loss;
 }
 
 LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_samples,
                            std::span<const TaskSample> test_samples, const TaskConfig& task_config,
                            std::size_t epoch) {
     if (train_samples.empty()) {
+        const EvalMetrics metrics = evaluate_task_metrics(model, test_samples, task_config);
         return LossPoint{
-            .test_loss = evaluate_task_loss(model, test_samples, task_config),
+            .test_loss = metrics.loss,
+            .test_accuracy = metrics.accuracy,
+            .accuracy_samples = metrics.accuracy_samples,
         };
     }
 
@@ -331,10 +514,13 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         }
     }
 
+    const EvalMetrics metrics = evaluate_task_metrics(model, test_samples, task_config);
     return LossPoint{
         .train_loss = train_loss_sum / static_cast<float>(trained_ticks),
         .self_loss = self_ticks == 0U ? 0.0F : self_loss_sum / static_cast<float>(self_ticks),
-        .test_loss = evaluate_task_loss(model, test_samples, task_config),
+        .test_loss = metrics.loss,
+        .test_accuracy = metrics.accuracy,
+        .accuracy_samples = metrics.accuracy_samples,
     };
 }
 
