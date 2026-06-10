@@ -45,7 +45,8 @@ void print_usage() {
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
-                 "[--idle-frames N] [--window N] [--lr F] [--class-loss-weight F] "
+                 "[--idle-frames N] [--window N] [--lr F] [--lr-decay F] "
+                 "[--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
@@ -296,6 +297,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--lr" || arg == "--learning-rate") {
             if (!parse_float(value, task_config.learning_rate)) {
+                return false;
+            }
+        } else if (arg == "--lr-decay" || arg == "--learning-rate-decay") {
+            if (!parse_float(value, task_config.learning_rate_decay)) {
                 return false;
             }
         } else if (arg == "--recency-decay") {
@@ -587,6 +592,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
               << " window=" << task_config.window_size << " lr=" << task_config.learning_rate
+              << " lr_decay=" << task_config.learning_rate_decay
               << " rejection_scale=" << task_config.rejection_scale
               << " rejection_threshold=" << task_config.rejection_threshold
               << " rejection_decay=" << task_config.rejection_decay
@@ -601,10 +607,14 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         const std::vector<float> epoch_bank_before(model.op_bank().begin(), model.op_bank().end());
         const vvm::LossPoint loss =
             vvm::train_task_epoch(model, dataset.train, dataset.test, task_config, epoch);
+        const float effective_lr =
+            task_config.learning_rate *
+            std::pow(task_config.learning_rate_decay, static_cast<float>(epoch));
         const float bank_delta_l2 = span_delta_l2(epoch_bank_before, model.op_bank());
         const float bank_from_init_l2 = span_delta_l2(initial_bank, model.op_bank());
         std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << loss.train_loss
-                  << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss;
+                  << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss
+                  << " effective_lr=" << effective_lr;
         if (loss.accuracy_samples > 0U) {
             if (loss.test_accuracy > best_accuracy) {
                 best_accuracy = loss.test_accuracy;

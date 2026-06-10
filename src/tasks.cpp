@@ -651,6 +651,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.window_size == 0U) {
         throw std::invalid_argument("window_size must be nonzero");
     }
+    if (task_config.learning_rate_decay < 0.0F || task_config.learning_rate_decay > 1.0F) {
+        throw std::invalid_argument("learning_rate_decay must be in [0, 1]");
+    }
     if (task_config.rejection_decay < 0.0F || task_config.rejection_decay > 1.0F) {
         throw std::invalid_argument("rejection_decay must be in [0, 1]");
     }
@@ -806,7 +809,9 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     }
 
     TrainConfig train_config{};
-    train_config.learning_rate = task_config.learning_rate;
+    train_config.learning_rate = task_config.learning_rate *
+                                 std::pow(task_config.learning_rate_decay,
+                                          static_cast<float>(epoch));
     train_config.recency_decay = task_config.recency_decay;
     train_config.max_grad_norm = task_config.max_grad_norm;
     train_config.rejection_scale = task_config.rejection_scale *

@@ -49,6 +49,7 @@ struct TaskConfig {
     std::size_t idle_frames_between_samples = 0;
     std::size_t window_size = 8;
     float learning_rate = 0.05F;
+    float learning_rate_decay = 1.0F;
     float recency_decay = 0.97F;
     float max_grad_norm = 1.0F;
     float rejection_scale = 0.0F;

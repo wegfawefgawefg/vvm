@@ -144,6 +144,7 @@ Tuning notes:
 - `--class-loss-weight` increases the gradient pressure on class registers.
 - `--class-value-scale` changes the class register target amplitude before
   target normalization.
+- `--lr-decay` reduces learning rate by epoch.
 - `--rejection-decay` reduces rejection pressure by epoch.
 
 Quick sweeps show that raising `--class-loss-weight` from the default binary
@@ -187,6 +188,13 @@ route_purity = sum_op max_label_count(op) / labeled_op_selections
 
 For two labels, `route_purity` near 0.5 means both labels are using the same op
 routes. Values closer to 1.0 mean selected ops are label-specialized.
+
+Current deterministic-eval MNIST-01 probes show an important drift pattern:
+useful class behavior appears early, then continued training can reduce
+accuracy even as class margin rises. Lower learning rates and LR/rejection
+decay preserve the early route longer, which suggests the remaining problem is
+stability/overwriting after useful routes form rather than a complete inability
+to learn.
 
 Further probes:
 
