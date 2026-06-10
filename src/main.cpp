@@ -22,7 +22,8 @@ int run_visualizer(const Config& config);
 int run_training_visualizer(const Config& config, const TaskConfig& task_config,
                             std::size_t epochs);
 int run_probe_visualizer(const Config& config, const TaskConfig& task_config, std::size_t epochs,
-                         bool restore_best, bool anchor_to_best);
+                         bool restore_best, bool anchor_to_best,
+                         const std::string& load_model_path);
 } // namespace vvm
 #endif
 
@@ -38,6 +39,8 @@ struct CliOptions {
     std::size_t hidden_dim = 64;
     float readout_learning_rate = 0.1F;
     std::string output_dir = "artifacts/reconstructions";
+    std::string save_model_path;
+    std::string load_model_path;
     ReadoutSource readout_source = ReadoutSource::Input;
     bool restore_best = false;
     bool anchor_to_best = false;
@@ -63,7 +66,8 @@ void print_usage() {
                  "[--rejection-overuse-scale F] "
                  "[--affinity-retain-scale F] "
                  "[--affinity-retain-threshold F] [--affinity-retain-underuse-scale F] "
-                 "[--op-anchor-scale F] [--anchor-to-best] [--bptt] [--restore-best]\n"
+                 "[--op-anchor-scale F] [--anchor-to-best] [--bptt] [--restore-best] "
+                 "[--save-model PATH]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm train-mlp [--task mnist-01|mnist] [--hidden N] [--readout-lr F] "
@@ -77,7 +81,7 @@ void print_usage() {
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm visualize-train [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--sample-frames N] [--idle-frames N] [--window N] [--lr F]\n"
-              << "  vvm visualize-probe [--epochs N] [train-task options]\n";
+              << "  vvm visualize-probe [--load-model PATH] [--epochs N] [train-task options]\n";
     std::cout << "notes:\n"
               << "  deadzone is the main VVM activation. relu, leaky-relu, and clamp are "
                  "ablation/control modes.\n";
@@ -323,6 +327,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--output-dir") {
             cli_options.output_dir = std::string(value);
+        } else if (arg == "--save-model") {
+            cli_options.save_model_path = std::string(value);
+        } else if (arg == "--load-model") {
+            cli_options.load_model_path = std::string(value);
         } else if (arg == "--readout-source") {
             if (!parse_readout_source(value, cli_options.readout_source)) {
                 return false;
@@ -871,6 +879,10 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
         }
         std::cout << '\n';
     }
+    if (!cli_options.save_model_path.empty()) {
+        model.save_checkpoint(cli_options.save_model_path);
+        std::cout << "saved_model=" << cli_options.save_model_path << '\n';
+    }
     return 0;
 }
 
@@ -1362,7 +1374,8 @@ int main(int argc, char** argv) {
         if (command == "visualize-probe") {
 #ifdef VVM_WITH_SDL3
             return vvm::run_probe_visualizer(config, task_config, cli_options.epochs,
-                                             cli_options.restore_best, cli_options.anchor_to_best);
+                                             cli_options.restore_best, cli_options.anchor_to_best,
+                                             cli_options.load_model_path);
 #else
             std::cerr << "visualizer was not built. Reconfigure with cmake --preset dev-sdl3.\n";
             return 2;

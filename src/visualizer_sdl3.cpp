@@ -407,37 +407,44 @@ int run_training_visualizer(const Config& config, const TaskConfig& task_config,
 }
 
 int run_probe_visualizer(const Config& config, const TaskConfig& task_config, std::size_t epochs,
-                         bool restore_best, bool anchor_to_best) {
+                         bool restore_best, bool anchor_to_best,
+                         const std::string& load_model_path) {
     Model model(config);
     const TaskDataset dataset = make_task_dataset(config, task_config);
-    const std::vector<float> initial_bank(model.op_bank().begin(), model.op_bank().end());
-    std::vector<float> best_bank;
     float best_balanced_accuracy = -1.0F;
 
-    std::cout << "training probe model for " << epochs << " epochs...\n";
-    for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
-        std::span<const float> op_anchor = {};
-        if (task_config.op_anchor_scale > 0.0F) {
-            if (anchor_to_best && !best_bank.empty()) {
-                op_anchor = best_bank;
-            } else if (!anchor_to_best) {
-                op_anchor = initial_bank;
+    if (!load_model_path.empty()) {
+        model.load_checkpoint(load_model_path);
+        std::cout << "loaded probe model from " << load_model_path << '\n';
+    } else {
+        const std::vector<float> initial_bank(model.op_bank().begin(), model.op_bank().end());
+        std::vector<float> best_bank;
+        std::cout << "training probe model for " << epochs << " epochs...\n";
+        for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
+            std::span<const float> op_anchor = {};
+            if (task_config.op_anchor_scale > 0.0F) {
+                if (anchor_to_best && !best_bank.empty()) {
+                    op_anchor = best_bank;
+                } else if (!anchor_to_best) {
+                    op_anchor = initial_bank;
+                }
+            }
+            const LossPoint loss =
+                train_task_epoch(model, dataset.train, dataset.test, task_config, epoch, op_anchor);
+            std::cout << "epoch " << epoch << " balanced=" << (100.0F * loss.test_balanced_accuracy)
+                      << "% class_ce=" << loss.test_class_cross_entropy
+                      << " loss=" << loss.test_loss << '\n';
+            if (loss.accuracy_samples > 0U &&
+                loss.test_balanced_accuracy > best_balanced_accuracy) {
+                best_balanced_accuracy = loss.test_balanced_accuracy;
+                if (restore_best || anchor_to_best) {
+                    best_bank.assign(model.op_bank().begin(), model.op_bank().end());
+                }
             }
         }
-        const LossPoint loss =
-            train_task_epoch(model, dataset.train, dataset.test, task_config, epoch, op_anchor);
-        std::cout << "epoch " << epoch << " balanced=" << (100.0F * loss.test_balanced_accuracy)
-                  << "% class_ce=" << loss.test_class_cross_entropy << " loss=" << loss.test_loss
-                  << '\n';
-        if (loss.accuracy_samples > 0U && loss.test_balanced_accuracy > best_balanced_accuracy) {
-            best_balanced_accuracy = loss.test_balanced_accuracy;
-            if (restore_best || anchor_to_best) {
-                best_bank.assign(model.op_bank().begin(), model.op_bank().end());
-            }
+        if (restore_best && !best_bank.empty()) {
+            model.replace_op_bank(best_bank);
         }
-    }
-    if (restore_best && !best_bank.empty()) {
-        model.replace_op_bank(best_bank);
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {

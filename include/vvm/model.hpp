@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <random>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace vvm {
@@ -135,6 +136,8 @@ class Model {
         return op_bank_;
     }
     void replace_op_bank(std::span<const float> op_bank);
+    void save_checkpoint(const std::string& path) const;
+    void load_checkpoint(const std::string& path);
 
     [[nodiscard]] std::size_t parameter_count() const {
         return op_bank_.size();

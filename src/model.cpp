@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <random>
 #include <stdexcept>
 
@@ -215,6 +218,106 @@ void Model::replace_op_bank(std::span<const float> op_bank) {
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
         normalize_op(op);
     }
+}
+
+void Model::save_checkpoint(const std::string& path) const {
+    const std::filesystem::path checkpoint_path(path);
+    if (checkpoint_path.has_parent_path()) {
+        std::filesystem::create_directories(checkpoint_path.parent_path());
+    }
+
+    std::ofstream out(checkpoint_path, std::ios::binary);
+    if (!out) {
+        throw std::runtime_error("failed to open checkpoint for write: " + path);
+    }
+
+    const char magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '1'};
+    const std::uint64_t state_dim = static_cast<std::uint64_t>(config_.state_dim);
+    const std::uint64_t num_ops = static_cast<std::uint64_t>(config_.num_ops);
+    const std::uint64_t candidate_count = static_cast<std::uint64_t>(config_.candidate_count);
+    const std::uint64_t sample_candidate_count =
+        static_cast<std::uint64_t>(config_.sample_candidate_count);
+    const std::uint64_t activation = static_cast<std::uint64_t>(config_.activation);
+    const std::uint64_t sample_retrieval = config_.sample_retrieval ? 1U : 0U;
+    const std::uint32_t seed = config_.seed;
+    const float scalars[] = {
+        config_.update_scale,          config_.input_scale,
+        config_.activation_threshold,  config_.activation_leak,
+        config_.retrieval_temperature, config_.state_heat_stddev,
+        config_.op_heat_stddev,        config_.heat_decay,
+        config_.curiosity_scale,
+    };
+
+    out.write(magic, sizeof(magic));
+    out.write(reinterpret_cast<const char*>(&state_dim), sizeof(state_dim));
+    out.write(reinterpret_cast<const char*>(&num_ops), sizeof(num_ops));
+    out.write(reinterpret_cast<const char*>(&candidate_count), sizeof(candidate_count));
+    out.write(reinterpret_cast<const char*>(&sample_candidate_count),
+              sizeof(sample_candidate_count));
+    out.write(reinterpret_cast<const char*>(&activation), sizeof(activation));
+    out.write(reinterpret_cast<const char*>(&sample_retrieval), sizeof(sample_retrieval));
+    out.write(reinterpret_cast<const char*>(&seed), sizeof(seed));
+    out.write(reinterpret_cast<const char*>(scalars), sizeof(scalars));
+    out.write(reinterpret_cast<const char*>(op_bank_.data()),
+              static_cast<std::streamsize>(op_bank_.size() * sizeof(float)));
+    if (!out) {
+        throw std::runtime_error("failed to write checkpoint: " + path);
+    }
+}
+
+void Model::load_checkpoint(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("failed to open checkpoint for read: " + path);
+    }
+
+    char magic[8] = {};
+    std::uint64_t state_dim = 0;
+    std::uint64_t num_ops = 0;
+    std::uint64_t candidate_count = 0;
+    std::uint64_t sample_candidate_count = 0;
+    std::uint64_t activation = 0;
+    std::uint64_t sample_retrieval = 0;
+    std::uint32_t seed = 0;
+    float scalars[9] = {};
+
+    in.read(magic, sizeof(magic));
+    in.read(reinterpret_cast<char*>(&state_dim), sizeof(state_dim));
+    in.read(reinterpret_cast<char*>(&num_ops), sizeof(num_ops));
+    in.read(reinterpret_cast<char*>(&candidate_count), sizeof(candidate_count));
+    in.read(reinterpret_cast<char*>(&sample_candidate_count), sizeof(sample_candidate_count));
+    in.read(reinterpret_cast<char*>(&activation), sizeof(activation));
+    in.read(reinterpret_cast<char*>(&sample_retrieval), sizeof(sample_retrieval));
+    in.read(reinterpret_cast<char*>(&seed), sizeof(seed));
+    in.read(reinterpret_cast<char*>(scalars), sizeof(scalars));
+    const char expected_magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '1'};
+    if (!in || std::memcmp(magic, expected_magic, sizeof(magic)) != 0) {
+        throw std::runtime_error("invalid VVM checkpoint: " + path);
+    }
+    if (state_dim != config_.state_dim || num_ops != config_.num_ops ||
+        candidate_count != config_.candidate_count ||
+        sample_candidate_count != config_.sample_candidate_count ||
+        activation != static_cast<std::uint64_t>(config_.activation) ||
+        sample_retrieval != (config_.sample_retrieval ? 1U : 0U) || seed != config_.seed ||
+        scalars[0] != config_.update_scale || scalars[1] != config_.input_scale ||
+        scalars[2] != config_.activation_threshold || scalars[3] != config_.activation_leak ||
+        scalars[4] != config_.retrieval_temperature || scalars[5] != config_.state_heat_stddev ||
+        scalars[6] != config_.op_heat_stddev || scalars[7] != config_.heat_decay ||
+        scalars[8] != config_.curiosity_scale) {
+        throw std::runtime_error("checkpoint config does not match current model config: " + path);
+    }
+
+    std::vector<float> loaded(op_bank_.size(), 0.0F);
+    in.read(reinterpret_cast<char*>(loaded.data()),
+            static_cast<std::streamsize>(loaded.size() * sizeof(float)));
+    if (!in) {
+        throw std::runtime_error("truncated VVM checkpoint: " + path);
+    }
+    char extra = '\0';
+    if (in.read(&extra, 1)) {
+        throw std::runtime_error("VVM checkpoint has unexpected trailing data: " + path);
+    }
+    replace_op_bank(loaded);
 }
 
 std::vector<float> Model::predict_next(std::span<const float> state,

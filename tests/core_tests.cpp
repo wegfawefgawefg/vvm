@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <random>
 #include <span>
@@ -50,6 +51,29 @@ void test_run_shape() {
         assert(trace.prediction_error >= 0.0F);
         assert(trace.curiosity_reward >= 0.0F);
     }
+}
+
+void test_checkpoint_round_trip() {
+    vvm::Config config{};
+    config.state_dim = 12;
+    config.num_ops = 8;
+    config.candidate_count = 4;
+    config.sample_candidate_count = 2;
+    config.update_scale = 1.5F;
+
+    vvm::Model model(config);
+    const std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "vvm_checkpoint_round_trip.vvmckpt";
+    model.save_checkpoint(path.string());
+
+    vvm::Model loaded(config);
+    loaded.load_checkpoint(path.string());
+    assert(loaded.op_bank().size() == model.op_bank().size());
+    for (std::size_t i = 0; i < model.op_bank().size(); ++i) {
+        assert(std::fabs(loaded.op_bank()[i] - model.op_bank()[i]) < 1.0e-5F);
+    }
+
+    std::filesystem::remove(path);
 }
 
 void test_retrieval_temperature_sharpens_candidate_weights() {
@@ -755,6 +779,7 @@ void test_invalid_config() {
 int main() {
     test_dot_product();
     test_run_shape();
+    test_checkpoint_round_trip();
     test_retrieval_temperature_sharpens_candidate_weights();
     test_sample_candidate_count_caps_sampled_rank();
     test_prediction_error();
