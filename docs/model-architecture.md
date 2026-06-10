@@ -167,6 +167,9 @@ Tuning notes:
   target normalization.
 - `--class-start-frame` delays class-register loss within each shown sample
   while keeping reconstruction/world-model pressure active.
+- `--class-ramp-frames` scales class-register target weight up over several
+  frames after `--class-start-frame`, preserving reconstruction pressure while
+  testing whether class pressure should accumulate gradually.
 - `--class-registers` widens the class-register constraint by repeating the
   class code across more state dimensions. This is still a state target, not a
   separate readout model.

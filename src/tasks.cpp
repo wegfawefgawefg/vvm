@@ -623,7 +623,7 @@ void record_train_result(const TrainResult& result, LossPoint& loss) {
 
 std::vector<float> target_weights_for_frame(const TaskSample& sample, std::size_t state_dim,
                                             std::size_t frame, const TaskConfig& task_config) {
-    if (frame >= task_config.class_start_frame || sample.label < 0 || sample.class_count <= 0) {
+    if (sample.label < 0 || sample.class_count <= 0) {
         return sample.target_weights;
     }
 
@@ -633,6 +633,19 @@ std::vector<float> target_weights_for_frame(const TaskSample& sample, std::size_
     const std::size_t class_end = class_begin + sample.class_dims;
     if (class_end > weights.size()) {
         throw std::invalid_argument("class target range exceeds target weights");
+    }
+    if (frame >= task_config.class_start_frame) {
+        if (task_config.class_ramp_frames <= 1U) {
+            return weights;
+        }
+        const std::size_t ramp_step = frame - task_config.class_start_frame + 1U;
+        const float class_weight_scale =
+            std::min(1.0F, static_cast<float>(ramp_step) /
+                               static_cast<float>(task_config.class_ramp_frames));
+        for (std::size_t dim = class_begin; dim < class_end; ++dim) {
+            weights[dim] *= class_weight_scale;
+        }
+        return weights;
     }
     for (std::size_t dim = class_begin; dim < class_end; ++dim) {
         weights[dim] = 0.0F;

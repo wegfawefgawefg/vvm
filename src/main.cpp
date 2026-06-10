@@ -49,7 +49,8 @@ void print_usage() {
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
                  "[--idle-frames N] [--window N] [--train-interval N] "
-                 "[--class-start-frame N] [--class-registers N] [--lr F] [--lr-decay F] "
+                 "[--class-start-frame N] [--class-ramp-frames N] "
+                 "[--class-registers N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F] [--op-anchor-scale F] "
@@ -326,6 +327,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--class-start-frame") {
             if (!parse_size(value, task_config.class_start_frame)) {
+                return false;
+            }
+        } else if (arg == "--class-ramp-frames") {
+            if (!parse_size(value, task_config.class_ramp_frames)) {
                 return false;
             }
         } else if (arg == "--class-registers") {
@@ -658,6 +663,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " window=" << task_config.window_size
               << " train_interval=" << task_config.train_interval
               << " class_start_frame=" << task_config.class_start_frame
+              << " class_ramp_frames=" << task_config.class_ramp_frames
               << " class_registers=" << task_config.class_registers
               << " lr=" << task_config.learning_rate
               << " lr_decay=" << task_config.learning_rate_decay

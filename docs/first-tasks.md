@@ -300,6 +300,22 @@ just insufficient bank movement. Useful routes form, then tiny continued
 updates can move the active route boundary; anchoring to the best learned bank
 is a practical stability diagnostic, not yet a solution to the accuracy ceiling.
 
+Class-register timing can also be ramped:
+
+```text
+--class-ramp-frames N
+```
+
+This keeps reconstruction/world-model pressure active from the first frame but
+scales class-register target weight up over the requested number of frames after
+`--class-start-frame`. A hard late gate, such as class supervision only on
+frames 6 and 7, undertrained badly at the current learning rate and stayed near
+`40%`. A 7-frame ramp from frame 1 was more stable but peaked lower:
+`84.4%` with the default class weight and `84.2%` with matched average class
+pressure via `--class-loss-weight 224`. Immediate class pressure plus best-bank
+anchoring remains the best current schedule, but the ramp confirms that the
+objective timing changes route stability.
+
 ### 8. CartPole Observation Prediction
 
 Before control, train next-observation prediction:
