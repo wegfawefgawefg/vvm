@@ -28,6 +28,8 @@ void test_run_shape() {
     config.steps = 3;
 
     vvm::Model model(config);
+    assert(model.parameter_count() == config.state_dim * config.num_ops);
+    assert(model.parameter_bytes() == model.parameter_count() * sizeof(float));
     const std::vector<float> initial_state = model.seeded_state();
     const vvm::RunResult result = model.run(initial_state);
 

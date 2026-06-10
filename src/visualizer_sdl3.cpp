@@ -1,7 +1,10 @@
 #include "vvm/model.hpp"
+#include "vvm/sdl_text.hpp"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cstddef>
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -14,7 +17,8 @@ void throw_sdl_error(const char* message) {
     throw std::runtime_error(std::string(message) + ": " + SDL_GetError());
 }
 
-void draw_trace(SDL_Renderer* renderer, const RunResult& result, int width, int height) {
+void draw_trace(SDL_Renderer* renderer, const Model& model, const RunResult& result, int width,
+                int height) {
     SDL_SetRenderDrawColor(renderer, 10, 12, 16, 255);
     SDL_RenderClear(renderer);
 
@@ -49,6 +53,25 @@ void draw_trace(SDL_Renderer* renderer, const RunResult& result, int width, int 
         SDL_SetRenderDrawColor(renderer, 230, 160, 70, 255);
         SDL_RenderFillRect(renderer, &activation_bar);
     }
+
+    const StepTrace& latest = result.trace.back();
+    const Config& config = model.config();
+    const double mib = static_cast<double>(model.parameter_bytes()) / (1024.0 * 1024.0);
+
+    char overlay[512];
+    std::snprintf(
+        overlay, sizeof(overlay),
+        "vvm  ops=%zu  d=%zu  params=%zu  %.2f MiB\n"
+        "steps=%zu  k=%zu  chosen=%zu  max=%.3f  chosen_score=%.3f\n"
+        "state_norm=%.3f  act=%.3f  pred_err=%.6f  curiosity=%.6f",
+        config.num_ops, config.state_dim, model.parameter_count(), mib, config.steps,
+        config.candidate_count, latest.retrieval.chosen_index,
+        static_cast<double>(latest.retrieval.max_score),
+        static_cast<double>(latest.retrieval.chosen_score), static_cast<double>(latest.state_norm),
+        static_cast<double>(latest.activation_mean), static_cast<double>(latest.prediction_error),
+        static_cast<double>(latest.curiosity_reward));
+
+    draw_text(renderer, 20, overlay, 14.0F, 14.0F, SDL_Color{235, 240, 245, 255});
 }
 
 } // namespace
@@ -65,6 +88,7 @@ int run_visualizer(const Config& config) {
         SDL_Quit();
         throw_sdl_error("SDL_CreateWindowAndRenderer failed");
     }
+    init_text_subsystem();
 
     Model model(config);
     const std::vector<float> initial_state = model.seeded_state();
@@ -82,11 +106,12 @@ int run_visualizer(const Config& config) {
         int width = 0;
         int height = 0;
         SDL_GetWindowSizeInPixels(window, &width, &height);
-        draw_trace(renderer, result, width, height);
+        draw_trace(renderer, model, result, width, height);
         SDL_RenderPresent(renderer);
         SDL_Delay(16);
     }
 
+    shutdown_text_subsystem();
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

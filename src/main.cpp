@@ -102,7 +102,9 @@ int run_headless(const vvm::Config& config) {
     const vvm::RunResult result = model.run(initial_state);
 
     std::cout << "steps=" << config.steps << " state_dim=" << config.state_dim
-              << " ops=" << config.num_ops << " candidates=" << config.candidate_count << '\n';
+              << " ops=" << config.num_ops << " candidates=" << config.candidate_count
+              << " params=" << model.parameter_count() << " param_bytes=" << model.parameter_bytes()
+              << '\n';
 
     for (std::size_t i = 0; i < result.trace.size(); ++i) {
         const vvm::StepTrace& trace = result.trace[i];

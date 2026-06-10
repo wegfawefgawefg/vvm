@@ -100,6 +100,14 @@ class Model {
         return op_bank_;
     }
 
+    [[nodiscard]] std::size_t parameter_count() const {
+        return op_bank_.size();
+    }
+
+    [[nodiscard]] std::size_t parameter_bytes() const {
+        return parameter_count() * sizeof(float);
+    }
+
     [[nodiscard]] RunResult run(std::span<const float> initial_state);
     [[nodiscard]] Tick tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock,
                             std::span<const float> input = {},

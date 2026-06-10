@@ -113,7 +113,10 @@ if (VVM_BUILD_CLI)
     vvm_apply_warnings(vvm)
 
     if (VVM_BUILD_VISUALIZER)
-        target_sources(vvm PRIVATE src/visualizer_sdl3.cpp)
+        target_sources(vvm PRIVATE
+            src/sdl_text.cpp
+            src/visualizer_sdl3.cpp
+        )
         target_compile_definitions(vvm PRIVATE VVM_WITH_SDL3=1)
         target_link_libraries(vvm PRIVATE SDL3::SDL3)
     endif()
