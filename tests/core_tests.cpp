@@ -1,5 +1,6 @@
 #include "vvm/model.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <exception>
@@ -20,7 +21,7 @@ void test_run_shape() {
     vvm::Config config{};
     config.state_dim = 16;
     config.num_ops = 32;
-    config.top_k = 4;
+    config.candidate_count = 4;
     config.steps = 3;
 
     vvm::Model model(config);
@@ -31,8 +32,12 @@ void test_run_shape() {
     assert(result.trace.size() == config.steps);
 
     for (const vvm::StepTrace& trace : result.trace) {
-        assert(trace.retrieval.indices.size() == config.top_k);
-        assert(trace.retrieval.weights.size() == config.top_k);
+        assert(trace.retrieval.candidate_indices.size() == config.candidate_count);
+        assert(trace.retrieval.candidate_weights.size() == config.candidate_count);
+        assert(trace.retrieval.chosen_index < config.num_ops);
+        assert(std::find(trace.retrieval.candidate_indices.begin(),
+                         trace.retrieval.candidate_indices.end(),
+                         trace.retrieval.chosen_index) != trace.retrieval.candidate_indices.end());
         assert(trace.state_norm > 0.0F);
         assert(trace.activation_mean >= 0.0F);
         assert(trace.prediction_error >= 0.0F);
@@ -50,7 +55,7 @@ void test_heat_creates_curiosity() {
     vvm::Config config{};
     config.state_dim = 16;
     config.num_ops = 32;
-    config.top_k = 4;
+    config.candidate_count = 4;
     config.steps = 3;
     config.state_heat_stddev = 0.1F;
 
@@ -69,7 +74,7 @@ void test_heat_creates_curiosity() {
 void test_invalid_config() {
     vvm::Config config{};
     config.num_ops = 2;
-    config.top_k = 3;
+    config.candidate_count = 3;
 
     bool threw = false;
     try {

@@ -7,7 +7,8 @@ feed-forward model.
 clock tick:
     input is folded into state
     state queries op bank by dot product
-    top-k ops produce the next predicted state
+    top candidates are fetched
+    one candidate op is sampled and executed
     heat perturbs vectors
     surprise is measured
     curiosity/reward update rules eventually modify the machine
@@ -24,8 +25,9 @@ The current C++ core implements this stripped tick:
 working_state = normalize(state + input_scale * input)
 heat(op_bank)
 scores = dot(working_state, op_i)
-R = average(top_k(scores))
-predicted = normalize(ReLU(working_state + update_scale * R))
+candidates = top_n(scores)
+op = sample_one(candidates)
+predicted = normalize(ReLU(working_state + update_scale * op))
 
 observed = normalize(predicted + heat(state))
 
@@ -95,6 +97,21 @@ uncontrollable heat forever. Candidate fixes:
 - keep a running surprise baseline
 - only reward error that later becomes predictable
 - use attention/masks so only useful dimensions contribute
+
+### Credit Assignment
+
+Candidate retrieval is not execution. Each tick:
+
+```text
+candidates = top_n(scores)
+chosen = sample_one(candidates)
+execute(chosen)
+```
+
+For the first manual backprop rule, only the chosen op should receive the
+gradient/update from that tick. Unchosen candidates were considered but did not
+run, so they should not learn from that transition. This keeps the VM
+instruction-like and makes truncated backprop simpler.
 
 ### Reinforcement
 

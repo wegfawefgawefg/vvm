@@ -48,6 +48,27 @@ void apply_heat(std::span<float> values, float stddev, std::mt19937& rng) {
     }
 }
 
+std::size_t sample_weighted(std::span<const float> weights, std::mt19937& rng) {
+    float total = 0.0F;
+    for (float weight : weights) {
+        total += weight;
+    }
+
+    if (total <= 0.0F) {
+        return 0;
+    }
+
+    std::uniform_real_distribution<float> dist(0.0F, total);
+    float needle = dist(rng);
+    for (std::size_t i = 0; i < weights.size(); ++i) {
+        if (needle <= weights[i]) {
+            return i;
+        }
+        needle -= weights[i];
+    }
+    return weights.size() - 1U;
+}
+
 } // namespace
 
 float l2_norm(std::span<const float> values) {
@@ -68,8 +89,8 @@ Model::Model(Config config) : config_(config) {
     if (config_.num_ops == 0U) {
         throw std::invalid_argument("num_ops must be nonzero");
     }
-    if (config_.top_k == 0U || config_.top_k > config_.num_ops) {
-        throw std::invalid_argument("top_k must be in [1, num_ops]");
+    if (config_.candidate_count == 0U || config_.candidate_count > config_.num_ops) {
+        throw std::invalid_argument("candidate_count must be in [1, num_ops]");
     }
     if (config_.update_scale < 0.0F) {
         throw std::invalid_argument("update_scale must be nonnegative");
@@ -162,40 +183,69 @@ Retrieval Model::retrieve(std::span<const float> state) const {
         scores.emplace_back(dot_product(state, op_vector), op);
     }
 
-    std::partial_sort(scores.begin(), scores.begin() + static_cast<std::ptrdiff_t>(config_.top_k),
-                      scores.end(),
-                      [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
+    std::partial_sort(
+        scores.begin(), scores.begin() + static_cast<std::ptrdiff_t>(config_.candidate_count),
+        scores.end(), [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
 
     Retrieval retrieval{};
-    retrieval.indices.resize(config_.top_k);
-    retrieval.weights.resize(config_.top_k, 1.0F / static_cast<float>(config_.top_k));
+    retrieval.candidate_indices.resize(config_.candidate_count);
+    retrieval.candidate_weights.resize(config_.candidate_count);
     retrieval.max_score = scores.front().first;
+    const float min_candidate_score = scores[config_.candidate_count - 1U].first;
 
-    for (std::size_t i = 0; i < config_.top_k; ++i) {
-        retrieval.indices[i] = scores[i].second;
+    float weight_sum = 0.0F;
+    for (std::size_t i = 0; i < config_.candidate_count; ++i) {
+        retrieval.candidate_indices[i] = scores[i].second;
+        retrieval.candidate_weights[i] =
+            std::max(scores[i].first - min_candidate_score + 1.0e-6F, 1.0e-6F);
+        weight_sum += retrieval.candidate_weights[i];
+    }
+    for (float& weight : retrieval.candidate_weights) {
+        weight /= weight_sum;
     }
     return retrieval;
 }
 
 Model::Prediction Model::predict_from_working_state(std::span<const float> working_state) const {
     Retrieval retrieval = retrieve(working_state);
-    std::vector<float> mixed_op(config_.state_dim, 0.0F);
-    for (std::size_t rank = 0; rank < retrieval.indices.size(); ++rank) {
-        const std::size_t op = retrieval.indices[rank];
-        const float weight = retrieval.weights[rank];
-        const std::span<const float> op_vector(op_bank_.data() + (op * config_.state_dim),
-                                               config_.state_dim);
-
-        for (std::size_t i = 0; i < config_.state_dim; ++i) {
-            mixed_op[i] += weight * op_vector[i];
-        }
-    }
+    retrieval.chosen_index = retrieval.candidate_indices.front();
+    retrieval.chosen_score = retrieval.max_score;
+    const std::span<const float> op_vector(
+        op_bank_.data() + (retrieval.chosen_index * config_.state_dim), config_.state_dim);
 
     std::vector<float> predicted_state(working_state.begin(), working_state.end());
     float activation_sum = 0.0F;
     for (std::size_t i = 0; i < config_.state_dim; ++i) {
         predicted_state[i] =
-            std::max(0.0F, predicted_state[i] + (config_.update_scale * mixed_op[i]));
+            std::max(0.0F, predicted_state[i] + (config_.update_scale * op_vector[i]));
+        activation_sum += predicted_state[i];
+    }
+    normalize_l2(predicted_state);
+
+    return Prediction{
+        .state = std::move(predicted_state),
+        .retrieval = std::move(retrieval),
+        .activation_mean = activation_sum / static_cast<float>(config_.state_dim),
+    };
+}
+
+Model::Prediction Model::predict_from_working_state(std::span<const float> working_state,
+                                                    std::mt19937& rng) const {
+    Retrieval retrieval = retrieve(working_state);
+    const std::size_t chosen_rank = sample_weighted(retrieval.candidate_weights, rng);
+    retrieval.chosen_index = retrieval.candidate_indices[chosen_rank];
+    retrieval.chosen_score = dot_product(
+        working_state,
+        std::span<const float>(op_bank_.data() + (retrieval.chosen_index * config_.state_dim),
+                               config_.state_dim));
+    const std::span<const float> op_vector(
+        op_bank_.data() + (retrieval.chosen_index * config_.state_dim), config_.state_dim);
+
+    std::vector<float> predicted_state(working_state.begin(), working_state.end());
+    float activation_sum = 0.0F;
+    for (std::size_t i = 0; i < config_.state_dim; ++i) {
+        predicted_state[i] =
+            std::max(0.0F, predicted_state[i] + (config_.update_scale * op_vector[i]));
         activation_sum += predicted_state[i];
     }
     normalize_l2(predicted_state);
@@ -222,7 +272,7 @@ StepTrace Model::step(std::vector<float>& state, std::mt19937& rng, std::size_t 
     }
     normalize_l2(working_state);
 
-    Prediction prediction = predict_from_working_state(working_state);
+    Prediction prediction = predict_from_working_state(working_state, rng);
     state = prediction.state;
 
     const float state_heat = decayed(config_.state_heat_stddev, config_.heat_decay, clock);

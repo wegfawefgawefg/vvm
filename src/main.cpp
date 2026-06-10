@@ -18,9 +18,9 @@ namespace {
 void print_usage() {
     std::cout << "usage:\n"
               << "  vvm smoke\n"
-              << "  vvm run [--steps N] [--state-dim N] [--ops N] [--top-k N] "
+              << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
-              << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--top-k N] "
+              << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n";
 }
 
@@ -59,8 +59,8 @@ bool parse_config(std::span<char*> args, vvm::Config& config) {
             if (!parse_size(value, config.num_ops)) {
                 return false;
             }
-        } else if (arg == "--top-k") {
-            if (!parse_size(value, config.top_k)) {
+        } else if (arg == "--candidates" || arg == "--top-k") {
+            if (!parse_size(value, config.candidate_count)) {
                 return false;
             }
         } else if (arg == "--update-scale") {
@@ -102,7 +102,7 @@ int run_headless(const vvm::Config& config) {
     const vvm::RunResult result = model.run(initial_state);
 
     std::cout << "steps=" << config.steps << " state_dim=" << config.state_dim
-              << " ops=" << config.num_ops << " top_k=" << config.top_k << '\n';
+              << " ops=" << config.num_ops << " candidates=" << config.candidate_count << '\n';
 
     for (std::size_t i = 0; i < result.trace.size(); ++i) {
         const vvm::StepTrace& trace = result.trace[i];
@@ -111,7 +111,8 @@ int run_headless(const vvm::Config& config) {
                   << " activation_mean=" << trace.activation_mean
                   << " prediction_error=" << trace.prediction_error
                   << " curiosity_reward=" << trace.curiosity_reward
-                  << " top_op=" << trace.retrieval.indices.front() << '\n';
+                  << " chosen_op=" << trace.retrieval.chosen_index
+                  << " chosen_score=" << trace.retrieval.chosen_score << '\n';
     }
     return 0;
 }

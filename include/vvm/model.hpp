@@ -11,7 +11,7 @@ namespace vvm {
 struct Config {
     std::size_t state_dim = 256;
     std::size_t num_ops = 1024;
-    std::size_t top_k = 8;
+    std::size_t candidate_count = 8;
     std::size_t steps = 8;
     float update_scale = 1.0F;
     float input_scale = 1.0F;
@@ -23,8 +23,10 @@ struct Config {
 };
 
 struct Retrieval {
-    std::vector<std::size_t> indices;
-    std::vector<float> weights;
+    std::vector<std::size_t> candidate_indices;
+    std::vector<float> candidate_weights;
+    std::size_t chosen_index = 0;
+    float chosen_score = 0.0F;
     float max_score = 0.0F;
 };
 
@@ -72,6 +74,8 @@ class Model {
 
     [[nodiscard]] Retrieval retrieve(std::span<const float> state) const;
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state) const;
+    [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state,
+                                                        std::mt19937& rng) const;
     [[nodiscard]] StepTrace step(std::vector<float>& state, std::mt19937& rng, std::size_t clock,
                                  std::span<const float> input = {});
     void heat_op_bank(float stddev, std::mt19937& rng);

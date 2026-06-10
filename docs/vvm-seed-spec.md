@@ -3,8 +3,9 @@
 The initial machine is:
 
 ```text
-R(t) = average(top_k(dot(S(t), OpBank)))
-S(t + 1) = normalize(ReLU(S(t) + update_scale * R(t)))
+candidates = top_n(dot(S(t), OpBank))
+op = sample_one(candidates)
+S(t + 1) = normalize(ReLU(S(t) + update_scale * op))
 ```
 
 ## V0 Constraints
@@ -27,7 +28,7 @@ Recommended MNIST-ish defaults once training is wired in:
 ```text
 state_dim = 256
 num_ops = 1024
-top_k = 8
+candidate_count = 8
 steps = 8
 update_scale = 1.0
 optimizer = AdamW
@@ -45,7 +46,7 @@ batch_size = 128
 - state norm mean/std
 - activation mean/std
 - accuracy vs steps
-- accuracy vs top-k
+- accuracy vs candidate count
 
 The central question is whether increasing recurrent execution steps improves
 performance over an encoder/readout baseline.
