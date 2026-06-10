@@ -45,7 +45,7 @@ void print_usage() {
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
-                 "[--idle-frames N] [--window N] [--lr F] [--lr-decay F] "
+                 "[--idle-frames N] [--window N] [--class-start-frame N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F] [--bptt]\n"
@@ -303,6 +303,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_size(value, task_config.window_size)) {
                 return false;
             }
+        } else if (arg == "--class-start-frame") {
+            if (!parse_size(value, task_config.class_start_frame)) {
+                return false;
+            }
         } else if (arg == "--lr" || arg == "--learning-rate") {
             if (!parse_float(value, task_config.learning_rate)) {
                 return false;
@@ -376,6 +380,24 @@ void print_counts(std::string_view name, std::span<const std::size_t> counts) {
             std::cout << ',';
         }
         std::cout << counts[i];
+    }
+    std::cout << ']';
+}
+
+void print_recalls(std::span<const std::size_t> correct_counts,
+                   std::span<const std::size_t> label_counts) {
+    if (correct_counts.empty() || correct_counts.size() != label_counts.size()) {
+        return;
+    }
+    std::cout << " recall=[";
+    for (std::size_t i = 0; i < correct_counts.size(); ++i) {
+        if (i > 0U) {
+            std::cout << ',';
+        }
+        const float recall = label_counts[i] == 0U ? 0.0F
+                                                   : static_cast<float>(correct_counts[i]) /
+                                                         static_cast<float>(label_counts[i]);
+        std::cout << (100.0F * recall) << "%";
     }
     std::cout << ']';
 }
@@ -602,7 +624,9 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " vectors=" << vector_range_name(task_config.vector_range)
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
-              << " window=" << task_config.window_size << " lr=" << task_config.learning_rate
+              << " window=" << task_config.window_size
+              << " class_start_frame=" << task_config.class_start_frame
+              << " lr=" << task_config.learning_rate
               << " lr_decay=" << task_config.learning_rate_decay
               << " momentum=" << task_config.momentum
               << " rejection_scale=" << task_config.rejection_scale
@@ -650,6 +674,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
             std::cout << " class_margin=" << loss.mean_class_margin;
             print_counts("labels", loss.label_counts);
             print_counts("preds", loss.prediction_counts);
+            print_recalls(loss.correct_counts, loss.label_counts);
             if (loss.class_route_purity > 0.0F) {
                 std::cout << " route_purity=" << loss.class_route_purity;
             }

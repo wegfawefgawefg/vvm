@@ -586,6 +586,25 @@ void record_train_result(const TrainResult& result, LossPoint& loss) {
     }
 }
 
+std::vector<float> target_weights_for_frame(const TaskSample& sample, std::size_t state_dim,
+                                            std::size_t frame, const TaskConfig& task_config) {
+    if (frame >= task_config.class_start_frame || sample.label < 0 || sample.class_count <= 0) {
+        return sample.target_weights;
+    }
+
+    std::vector<float> weights =
+        sample.target_weights.empty() ? uniform_weights(state_dim, 1.0F) : sample.target_weights;
+    const std::size_t class_begin = sample.class_offset;
+    const std::size_t class_end = class_begin + static_cast<std::size_t>(sample.class_count);
+    if (class_end > weights.size()) {
+        throw std::invalid_argument("class target range exceeds target weights");
+    }
+    for (std::size_t dim = class_begin; dim < class_end; ++dim) {
+        weights[dim] = 0.0F;
+    }
+    return weights;
+}
+
 void finalize_op_usage(LossPoint& loss) {
     std::size_t selected_ops = 0;
     std::size_t max_op_selections = 0;
@@ -663,6 +682,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     }
     if (task_config.window_size == 0U) {
         throw std::invalid_argument("window_size must be nonzero");
+    }
+    if (task_config.class_start_frame > task_config.frames_per_sample) {
+        throw std::invalid_argument("class_start_frame must be <= frames_per_sample");
     }
     if (task_config.learning_rate_decay < 0.0F || task_config.learning_rate_decay > 1.0F) {
         throw std::invalid_argument("learning_rate_decay must be in [0, 1]");
@@ -861,6 +883,7 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
         .accuracy_samples = accuracy_samples,
         .label_counts = std::move(label_counts),
         .prediction_counts = std::move(prediction_counts),
+        .correct_counts = std::move(correct_counts),
     };
 }
 
@@ -881,6 +904,9 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         loss.test_accuracy = metrics.accuracy;
         loss.test_balanced_accuracy = metrics.balanced_accuracy;
         loss.accuracy_samples = metrics.accuracy_samples;
+        loss.label_counts = metrics.label_counts;
+        loss.prediction_counts = metrics.prediction_counts;
+        loss.correct_counts = metrics.correct_counts;
         loss.op_selection_counts.assign(model.config().num_ops, 0U);
         return loss;
     }
@@ -936,8 +962,10 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                 ((epoch * train_samples.size()) + order_index) * task_config.frames_per_sample +
                 frame;
             Tick tick = model.tick(state, rng, clock, sample.input);
+            const std::vector<float> frame_target_weights =
+                target_weights_for_frame(sample, model.config().state_dim, frame, task_config);
             apply_observation(tick, sample.target, model.config().curiosity_scale,
-                              sample.target_weights);
+                              frame_target_weights);
             record_tick_diagnostics(tick, sample, model.config().num_ops, diagnostics);
 
             train_loss_sum += tick.prediction_error;
@@ -988,6 +1016,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     diagnostics.accuracy_samples = metrics.accuracy_samples;
     diagnostics.label_counts = metrics.label_counts;
     diagnostics.prediction_counts = metrics.prediction_counts;
+    diagnostics.correct_counts = metrics.correct_counts;
     finalize_op_usage(diagnostics);
     return diagnostics;
 }

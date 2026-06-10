@@ -373,6 +373,89 @@ void test_train_window_momentum_runs() {
     assert(second.learning_update_l2 > 0.0F);
 }
 
+float one_step_weighted_loss(const vvm::Config& config, std::span<const float> op_bank,
+                             std::span<const float> working_state, std::span<const float> target,
+                             std::span<const float> target_weights) {
+    vvm::Model model(config);
+    model.replace_op_bank(op_bank);
+    const std::vector<float> prediction = model.predict_next(working_state);
+    return vvm::Model::prediction_error(prediction, target, target_weights);
+}
+
+void test_weighted_gradient_matches_finite_difference_direction() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 1;
+    config.update_scale = 1.0F;
+    config.sample_retrieval = false;
+    config.activation = vvm::ActivationKind::Clamp;
+    config.state_heat_stddev = 0.0F;
+    config.op_heat_stddev = 0.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    vvm::Tick tick = model.tick(state, rng, 0);
+
+    std::vector<float> target = tick.predicted_state;
+    target[0] += 0.30F;
+    target[1] -= 0.20F;
+    const float target_norm = vvm::l2_norm(target);
+    for (float& value : target) {
+        value /= target_norm;
+    }
+    std::vector<float> target_weights(config.state_dim, 1.0F);
+    target_weights[0] = 8.0F;
+    target_weights[1] = 4.0F;
+    vvm::apply_observation(tick, target, config.curiosity_scale, target_weights);
+
+    const std::vector<float> before(model.op_bank().begin(), model.op_bank().end());
+    const std::size_t op_offset = tick.chosen_op * config.state_dim;
+    std::size_t dim = 0;
+    for (; dim < config.state_dim; ++dim) {
+        if (std::fabs(tick.pre_activation[dim]) < 0.75F) {
+            break;
+        }
+    }
+    assert(dim < config.state_dim);
+
+    constexpr float kEpsilon = 1.0e-3F;
+    std::vector<float> plus = before;
+    std::vector<float> minus = before;
+    plus[op_offset + dim] += kEpsilon;
+    minus[op_offset + dim] -= kEpsilon;
+    const std::span<const float> plus_op(plus.data() + op_offset, config.state_dim);
+    const std::span<const float> minus_op(minus.data() + op_offset, config.state_dim);
+    const float plus_norm = vvm::l2_norm(plus_op);
+    const float minus_norm = vvm::l2_norm(minus_op);
+    for (std::size_t i = 0; i < config.state_dim; ++i) {
+        plus[op_offset + i] /= plus_norm;
+        minus[op_offset + i] /= minus_norm;
+    }
+
+    const float plus_loss =
+        one_step_weighted_loss(config, plus, tick.working_state, target, target_weights);
+    const float minus_loss =
+        one_step_weighted_loss(config, minus, tick.working_state, target, target_weights);
+    const float finite_difference = (plus_loss - minus_loss) / (2.0F * kEpsilon);
+
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 1.0e-3F;
+    train_config.max_grad_norm = 0.0F;
+    const vvm::TrainResult result =
+        model.train_window(std::span<const vvm::Tick>(&tick, 1), train_config);
+    assert(result.updated_ops == 1U);
+
+    const std::span<const float> after = model.op_bank();
+    const float actual_delta = after[op_offset + dim] - before[op_offset + dim];
+
+    assert(std::isfinite(finite_difference));
+    assert(std::isfinite(actual_delta));
+    assert(std::fabs(finite_difference) > 1.0e-5F);
+    assert(actual_delta * finite_difference < 0.0F);
+}
+
 void test_rejection_lowers_bad_op_affinity() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -501,6 +584,7 @@ int main() {
     test_repeated_identical_ticks_do_not_shrink_update();
     test_backprop_through_state_window_runs();
     test_train_window_momentum_runs();
+    test_weighted_gradient_matches_finite_difference_direction();
     test_rejection_lowers_bad_op_affinity();
     test_observation_creates_curiosity_without_heat();
     test_task_training_runs(vvm::TaskKind::CopyInput, 0U);

@@ -199,6 +199,18 @@ std::vector<float> Model::seeded_state(float scale) const {
     return state;
 }
 
+void Model::replace_op_bank(std::span<const float> op_bank) {
+    if (op_bank.size() != op_bank_.size()) {
+        throw std::invalid_argument("replacement op bank size does not match model config");
+    }
+
+    op_bank_.assign(op_bank.begin(), op_bank.end());
+    op_velocity_.assign(op_bank_.size(), 0.0F);
+    for (std::size_t op = 0; op < config_.num_ops; ++op) {
+        normalize_op(op);
+    }
+}
+
 std::vector<float> Model::predict_next(std::span<const float> state,
                                        std::span<const float> input) const {
     if (state.size() != config_.state_dim) {

@@ -177,16 +177,25 @@ Current best 256-op binary MNIST probe:
 
 ```text
 --ops 256 --candidates 16 --sample-frames 8 --window 8
+--class-start-frame 2
 --lr 0.0005 --lr-decay 0.5 --momentum 0.9
 --max-grad-norm 0.1 --update-scale 2.0
 --rejection-scale 0.02 --rejection-decay 0.5
 ```
 
-This reached about `79.7%` balanced accuracy and held around `78.5%` after the
-learning rate decayed. Plain SGD under the same basic setup peaked lower or
-drifted harder. Larger banks (`512` ops) spread usage but performed worse with
-this schedule; smaller banks show a capacity boundary (`128` ops near `78%`,
-`64` ops near collapse/random).
+This reached about `80.5%` balanced accuracy and held that level after the
+learning rate decayed. The useful setup change is delaying class-register loss
+until frame 2 while keeping reconstruction pressure active from frame 0. Frame 1
+can hit about `80%` briefly but is less stable; frames 3-4 undertrain the class
+registers. Plain SGD under the same basic setup peaked lower or drifted harder.
+Larger banks (`512` ops) spread usage but performed worse with this schedule;
+smaller banks show a capacity boundary (`128` ops near `78%`, `64` ops near
+collapse/random).
+
+The gradient path now has a finite-difference direction test for weighted
+targets, including op-row renormalization. That test passed, so the current
+MNIST bottleneck is less likely to be a simple weighted-loss sign or denominator
+bug.
 
 Usage-aware rejection is now available:
 

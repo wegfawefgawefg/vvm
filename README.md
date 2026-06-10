@@ -97,10 +97,12 @@ sum for each op; the CLI prints the highest single op plus top-three
 it also prints label and prediction counts, `balanced_accuracy`,
 `class_margin`, `test_nonclass_loss`, and `test_class_loss`. `--hard-retrieval`
 uses the nearest op deterministically instead of sampling among top candidates.
-`--class-value-scale`, `--class-loss-weight`, `--lr-decay`, `--momentum`, and
-`--rejection-decay` are tuning knobs for register targets and anti-collapse
-pressure. `--rejection-overuse-scale` makes rejection focus on ops that are
-over-selected relative to the current epoch's usage distribution.
+`--class-start-frame`, `--class-value-scale`, `--class-loss-weight`,
+`--lr-decay`, `--momentum`, and `--rejection-decay` are tuning knobs for register
+targets and anti-collapse pressure. `--class-start-frame` delays class-register
+loss while still training reconstruction from frame 0. `--rejection-overuse-scale`
+makes rejection focus on ops that are over-selected relative to the current
+epoch's usage distribution.
 
 ## Layout
 

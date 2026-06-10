@@ -48,6 +48,7 @@ struct TaskConfig {
     std::size_t frames_per_sample = 8;
     std::size_t idle_frames_between_samples = 0;
     std::size_t window_size = 8;
+    std::size_t class_start_frame = 0;
     float learning_rate = 0.05F;
     float learning_rate_decay = 1.0F;
     float momentum = 0.0F;
@@ -75,6 +76,7 @@ struct EvalMetrics {
     std::size_t accuracy_samples = 0;
     std::vector<std::size_t> label_counts;
     std::vector<std::size_t> prediction_counts;
+    std::vector<std::size_t> correct_counts;
 };
 
 struct LossPoint {
@@ -102,6 +104,7 @@ struct LossPoint {
     float max_op_train_l2 = 0.0F;
     std::vector<std::size_t> label_counts;
     std::vector<std::size_t> prediction_counts;
+    std::vector<std::size_t> correct_counts;
     std::vector<std::size_t> op_selection_counts;
     std::vector<std::size_t> class_op_selection_counts;
     std::vector<float> op_heat_l2_by_op;

@@ -125,6 +125,7 @@ class Model {
     [[nodiscard]] std::span<const float> op_bank() const {
         return op_bank_;
     }
+    void replace_op_bank(std::span<const float> op_bank);
 
     [[nodiscard]] std::size_t parameter_count() const {
         return op_bank_.size();
