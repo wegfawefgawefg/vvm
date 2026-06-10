@@ -150,7 +150,7 @@ or reward prediction progress instead of raw error.
 
 ## Prediction And Curiosity
 
-Prediction loss and curiosity use the same error signal in opposite ways.
+Prediction loss and curiosity currently use the same observed mismatch.
 
 Model training:
 
@@ -171,17 +171,57 @@ prediction_error = mse(predicted_next, observed_next)
 curiosity_reward = curiosity_scale * prediction_error
 ```
 
-Better future signal:
+`observed_next` is not limited to heat. The runtime tick first observes the
+actual next state after heat, but an environment or trainer can later replace
+that observation with the externally grounded target/observation for the same
+tick. The helper is:
 
-```text
-curiosity = previous_expected_error - current_error
+```cpp
+apply_observation(tick, observed_state, curiosity_scale)
 ```
 
-or:
+This recomputes:
 
 ```text
-curiosity = prediction_error - noise_baseline
+prediction_error
+curiosity_reward
+total_reward
 ```
+
+So curiosity does not require heat. Heat is just one possible cause of mismatch.
+External observations, sample targets, environment transitions, or internal
+state perturbations can all create surprise.
+
+As implemented today, curiosity is a measured intrinsic reward scalar. By
+itself, this is not enough to create meaningful behavior. A reward only changes
+behavior once some control rule consumes it:
+
+- action selection in an environment
+- candidate-op affinity updates
+- value/return credit assignment over a recent window
+- heat/input gain control
+
+Current VVM uses prediction error for local op-content training and optional
+weak rejection for bad op/query matches. It does not yet use curiosity to make
+actions or op choices more likely.
+
+Raw surprise should also not be maximized blindly. That would reward noise,
+chaos, and self-generated instability. The desired signal is a mixture:
+
+```text
+curiosity = novelty_weight * surprise
+          + progress_weight * learnability
+```
+
+Where:
+
+```text
+surprise = prediction_error
+learnability = max(previous_error_baseline - current_error, 0)
+```
+
+This keeps the immediate human-like "what was that?" reaction while reducing
+the incentive to chase permanently unpredictable noise.
 
 ## External Goals
 
@@ -375,6 +415,30 @@ normalize(op_chosen)
 
 Only the chosen op updates for that tick.
 
+### Weak Rejection
+
+VVM does not backprop through discrete candidate selection in v0. Candidate
+selection is treated as sampled VM control flow.
+
+To stop a bad op from monopolizing the same query, the trainer can add a weak
+local rejection term:
+
+```text
+if prediction_error > rejection_threshold:
+    gradient += rejection_scale * (prediction_error - rejection_threshold) * working
+```
+
+Then normal gradient descent does:
+
+```text
+op_chosen -= learning_rate * gradient
+```
+
+So the chosen op moves slightly away from the query that it failed to serve.
+This is intentionally weak and local. It keeps the op table spread over state
+space without introducing a policy network, soft attention, or extra symbolic
+machinery.
+
 ## Gradient Safety
 
 Use:
@@ -412,13 +476,18 @@ Useful stability metrics:
 prediction_error_mean
 prediction_error_slope
 curiosity_reward_mean
+curiosity_reward_slope
 state_norm
 op_norm_mean
+activation_mean
+activation_slope
 mean dot(S_t, S_t-1)
 mean dot(S_t, S_t-k)
 chosen_op_entropy
 candidate_entropy
 op_bank_drift_from_snapshot
+rejection_rate
+self_loss_mean
 ```
 
 Heat should not be treated as free creativity. It is an exploration pressure with
@@ -426,17 +495,25 @@ a budget. If prediction error remains high but does not become learnable, the
 system is probably chasing noise. In that case reduce heat, subtract a noise
 baseline, or mask that source from curiosity.
 
+An auto-gain loop can tune magnitudes like camera auto ISO:
+
+```text
+target_activation = small positive band
+if activation_mean too low: increase input/update/heat scale slightly
+if activation_mean too high: decrease input/update/heat scale slightly
+```
+
 First anti-drift rule:
 
 ```text
-if prediction_error is high and prediction_error_slope >= 0:
-    reduce effective heat
+if self_loss is high and not improving:
+    reduce heat or rejection scale
 ```
 
-First curiosity rule:
+First curiosity-progress rule:
 
 ```text
-curiosity = max(previous_error_baseline - current_error, 0)
+learnability = max(previous_error_baseline - current_error, 0)
 ```
 
 This rewards learning progress instead of permanent unpredictability.

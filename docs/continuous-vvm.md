@@ -38,6 +38,15 @@ curiosity_reward = curiosity_scale * prediction_error
 Defaults keep heat at zero, so tests and smoke runs are deterministic unless
 heat is enabled.
 
+External observation can replace the tick's observed state after the fact:
+
+```text
+apply_observation(tick, externally_observed_or_target_state)
+```
+
+That recomputes prediction error and curiosity. Curiosity therefore does not
+require heat; heat is only one possible source of surprise.
+
 ## ICM References
 
 Pathak et al. define curiosity as next-state prediction error in a learned
@@ -89,14 +98,33 @@ V0 reports:
 curiosity_reward = curiosity_scale * prediction_error
 ```
 
-This is only a diagnostic and toy reward. The next version should avoid rewarding
-uncontrollable heat forever. Candidate fixes:
+This is a measured intrinsic reward scalar. It is useful for logging and for
+future control rules, but it does not create meaningful behavior by itself. A
+reward must be consumed by something:
+
+- an environment action selector
+- candidate-op affinity updates
+- a value/return learner over a window
+- adaptive heat/input/update gain control
+
+The next version should avoid rewarding uncontrollable heat forever. Candidate
+fixes:
 
 - reward prediction improvement instead of raw error
 - subtract expected heat error
 - keep a running surprise baseline
 - only reward error that later becomes predictable
 - use attention/masks so only useful dimensions contribute
+
+The target signal is not "maximize loss." It is closer to:
+
+```text
+curiosity = novelty_weight * surprise
+          + progress_weight * max(previous_error_baseline - current_error, 0)
+```
+
+Raw surprise gives the immediate "what was that?" response. Learning progress
+keeps the system from getting stuck worshipping noise.
 
 ### Credit Assignment
 
@@ -112,6 +140,16 @@ For the first manual backprop rule, only the chosen op should receive the
 gradient/update from that tick. Unchosen candidates were considered but did not
 run, so they should not learn from that transition. This keeps the VM
 instruction-like and makes truncated backprop simpler.
+
+The current optional routing correction is weak rejection:
+
+```text
+if chosen op loss is above threshold:
+    move chosen op slightly away from the query
+```
+
+This is not backprop through selection. It is a local table-spreading rule so a
+bad op stops monopolizing a state region and other nearby ops can bubble up.
 
 ### Reinforcement
 
@@ -161,6 +199,26 @@ Open questions:
 The main risk is rattling the machine into meaningless motion. The working
 principle for now is: normalize after heat, start with tiny heat, and record
 whether surprise decays or stays high.
+
+Track whether curiosity is chasing internal instability:
+
+```text
+self_loss_mean
+self_loss_slope
+activation_mean
+chosen_op_entropy
+candidate_entropy
+op_bank_drift
+```
+
+Magnitudes can later be tuned with an auto-ISO style controller:
+
+```text
+if activation too low: raise input/update/heat scale slightly
+if activation too high: lower input/update/heat scale slightly
+if self_loss high and flat: lower heat or rejection
+if op usage collapses: increase sampling/rejection slightly
+```
 
 ## Input And Output Sampling
 
