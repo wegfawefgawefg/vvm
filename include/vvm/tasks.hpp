@@ -64,6 +64,7 @@ struct TaskConfig {
     float rejection_overuse_scale = 0.0F;
     float affinity_retain_scale = 0.0F;
     float affinity_retain_threshold = 0.0F;
+    float affinity_retain_underuse_scale = 0.0F;
     float op_anchor_scale = 0.0F;
     float class_value_scale = 2.0F;
     float class_loss_weight = 0.0F;

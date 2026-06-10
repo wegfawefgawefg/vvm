@@ -181,6 +181,9 @@ Tuning notes:
   threshold, the op is nudged toward the working state that selected it. This is
   the mirror of rejection pressure for bad matches. It is diagnostic for route
   addressability, not a default.
+- `--affinity-retain-underuse-scale` gates that positive route pressure by how
+  under-selected the op is relative to average epoch usage. This avoids making
+  already-dominant routes stickier.
 - `--retrieval-temperature 0` uses the default linear top-k sampling weights;
   positive values use score softmax over the top-k set.
 - `--lr-decay` reduces learning rate by epoch.

@@ -501,6 +501,9 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     if (train_config.affinity_retain_threshold < 0.0F) {
         throw std::invalid_argument("affinity_retain_threshold must be nonnegative");
     }
+    if (train_config.affinity_retain_underuse_scale < 0.0F) {
+        throw std::invalid_argument("affinity_retain_underuse_scale must be nonnegative");
+    }
     if (train_config.op_anchor_scale < 0.0F) {
         throw std::invalid_argument("op_anchor_scale must be nonnegative");
     }
@@ -582,8 +585,22 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
             return;
         }
 
+        float usage_multiplier = 1.0F;
+        if (train_config.affinity_retain_underuse_scale > 0.0F &&
+            !train_config.op_usage_counts.empty()) {
+            std::size_t total_usage = 0;
+            for (const std::size_t count : train_config.op_usage_counts) {
+                total_usage += count;
+            }
+            const float expected_usage = std::max(1.0F, static_cast<float>(total_usage) /
+                                                            static_cast<float>(config_.num_ops));
+            const float op_usage = static_cast<float>(train_config.op_usage_counts[tick.chosen_op]);
+            const float underuse = std::max(0.0F, (expected_usage - op_usage) / expected_usage);
+            usage_multiplier = train_config.affinity_retain_underuse_scale * underuse;
+        }
+
         const float attraction =
-            recency_weight * train_config.affinity_retain_scale * retain_margin;
+            recency_weight * train_config.affinity_retain_scale * retain_margin * usage_multiplier;
         const std::size_t op_offset = tick.chosen_op * config_.state_dim;
         for (std::size_t i = 0; i < config_.state_dim; ++i) {
             gradients[op_offset + i] -= attraction * tick.working_state[i];

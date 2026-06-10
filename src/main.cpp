@@ -54,8 +54,8 @@ void print_usage() {
                  "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F] [--affinity-retain-scale F] "
-                 "[--affinity-retain-threshold F] [--op-anchor-scale F] "
-                 "[--anchor-to-best] [--bptt] [--restore-best]\n"
+                 "[--affinity-retain-threshold F] [--affinity-retain-underuse-scale F] "
+                 "[--op-anchor-scale F] [--anchor-to-best] [--bptt] [--restore-best]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
@@ -382,6 +382,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_float(value, task_config.affinity_retain_threshold)) {
                 return false;
             }
+        } else if (arg == "--affinity-retain-underuse-scale") {
+            if (!parse_float(value, task_config.affinity_retain_underuse_scale)) {
+                return false;
+            }
         } else if (arg == "--op-anchor-scale") {
             if (!parse_float(value, task_config.op_anchor_scale)) {
                 return false;
@@ -683,6 +687,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " rejection_overuse_scale=" << task_config.rejection_overuse_scale
               << " affinity_retain_scale=" << task_config.affinity_retain_scale
               << " affinity_retain_threshold=" << task_config.affinity_retain_threshold
+              << " affinity_retain_underuse_scale=" << task_config.affinity_retain_underuse_scale
               << " op_anchor_scale=" << task_config.op_anchor_scale
               << " anchor_to_best=" << (cli_options.anchor_to_best ? 1 : 0)
               << " class_value_scale=" << task_config.class_value_scale

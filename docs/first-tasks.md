@@ -321,6 +321,7 @@ Positive route retention is available for diagnostics:
 ```text
 --affinity-retain-scale F
 --affinity-retain-threshold F
+--affinity-retain-underuse-scale F
 ```
 
 This only updates selected ops. If a selected op's prediction error is below the
@@ -331,6 +332,12 @@ balanced accuracy to about `84.2%` and made op 36 more dominant. So the sign and
 mechanism work, but naive positive affinity makes routes too sticky instead of
 breaking the current ceiling. If this idea is reused, it likely needs underuse or
 margin gating rather than unconditional "good op gets stickier" pressure.
+
+Underuse-gated retention was tested with the same scale and threshold plus
+`--affinity-retain-underuse-scale 1.0`. It avoided the op-36 over-stickiness and
+recovered the current `85.7%` best-bank-anchored plateau, but did not improve
+past it. That makes the gate safer than unconditional retention, but neutral at
+the tested setting.
 
 ### 8. CartPole Observation Prediction
 
