@@ -191,12 +191,12 @@ TaskSample make_mnist_sample(std::span<const unsigned char, 784> pixels, unsigne
     normalize_l2(input);
 
     std::vector<float> target(state_dim, 0.0F);
-    std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
-    constexpr float kImageWeight = 1.0F;
+    std::vector<float> target_weights = uniform_weights(state_dim, task_config.world_loss_weight);
+    const float image_weight = task_config.world_loss_weight > 0.0F ? 1.0F : 0.0F;
     const float class_value_scale = task_config.class_value_scale;
     const float class_target_weight = class_loss_weight_or(task_config.class_loss_weight, 64.0F);
     for (std::size_t i = 0; i < pixels.size(); ++i) {
-        target[i] = kImageWeight * input[i];
+        target[i] = image_weight * input[i];
     }
     const std::vector<float> digit =
         class_vector(class_dims, static_cast<int>(label), static_cast<int>(kDigitClasses),
@@ -241,12 +241,12 @@ TaskSample make_mnist_binary_sample(std::span<const unsigned char, 784> pixels, 
     normalize_l2(input);
 
     std::vector<float> target(state_dim, 0.0F);
-    std::vector<float> target_weights = uniform_weights(state_dim, 1.0F);
-    constexpr float kImageWeight = 1.0F;
+    std::vector<float> target_weights = uniform_weights(state_dim, task_config.world_loss_weight);
+    const float image_weight = task_config.world_loss_weight > 0.0F ? 1.0F : 0.0F;
     const float class_value_scale = task_config.class_value_scale;
     const float class_target_weight = class_loss_weight_or(task_config.class_loss_weight, 128.0F);
     for (std::size_t i = 0; i < pixels.size(); ++i) {
-        target[i] = kImageWeight * input[i];
+        target[i] = image_weight * input[i];
     }
     const std::vector<float> digit =
         class_vector(class_dims, static_cast<int>(label), static_cast<int>(kDigitClasses),
@@ -775,6 +775,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     }
     if (task_config.class_loss_weight < 0.0F) {
         throw std::invalid_argument("class_loss_weight must be nonnegative");
+    }
+    if (task_config.world_loss_weight < 0.0F) {
+        throw std::invalid_argument("world_loss_weight must be nonnegative");
     }
     if (model_config.state_dim == 0U) {
         throw std::invalid_argument("state_dim must be nonzero");

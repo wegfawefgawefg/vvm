@@ -66,6 +66,7 @@ struct TaskConfig {
     float affinity_retain_threshold = 0.0F;
     float affinity_retain_underuse_scale = 0.0F;
     float op_anchor_scale = 0.0F;
+    float world_loss_weight = 1.0F;
     float class_value_scale = 2.0F;
     float class_loss_weight = 0.0F;
     bool backprop_through_state = false;

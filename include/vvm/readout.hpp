@@ -63,4 +63,25 @@ class MlpReadout {
     std::vector<float> output_biases_;
 };
 
+class MlpAutoencoder {
+  public:
+    explicit MlpAutoencoder(ReadoutConfig config);
+
+    [[nodiscard]] const ReadoutConfig& config() const {
+        return config_;
+    }
+
+    [[nodiscard]] std::vector<float> predict(std::span<const float> input) const;
+    [[nodiscard]] float loss_one(std::span<const float> input, std::span<const float> target) const;
+    [[nodiscard]] float train_one(std::span<const float> input, std::span<const float> target);
+    [[nodiscard]] std::size_t parameter_count() const;
+
+  private:
+    ReadoutConfig config_;
+    std::vector<float> input_hidden_weights_;
+    std::vector<float> hidden_biases_;
+    std::vector<float> hidden_output_weights_;
+    std::vector<float> output_biases_;
+};
+
 } // namespace vvm

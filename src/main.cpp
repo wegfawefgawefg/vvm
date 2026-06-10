@@ -54,7 +54,7 @@ void print_usage() {
                  "[--class-start-frame N] [--class-ramp-frames N] "
                  "[--class-registers N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
-                 "[--class-value-scale F] [--rejection-decay F] "
+                 "[--world-loss-weight F] [--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F] "
                  "[--affinity-retain-scale F] "
                  "[--affinity-retain-threshold F] [--affinity-retain-underuse-scale F] "
@@ -63,6 +63,8 @@ void print_usage() {
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm train-mlp [--task mnist-01|mnist] [--hidden N] [--readout-lr F] "
                  "[--epochs N] [--train-samples N] [--test-samples N]\n"
+              << "  vvm train-autoencoder [--task mnist-01|mnist] [--hidden N] "
+                 "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
@@ -407,6 +409,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_float(value, task_config.class_value_scale)) {
                 return false;
             }
+        } else if (arg == "--world-loss-weight") {
+            if (!parse_float(value, task_config.world_loss_weight)) {
+                return false;
+            }
         } else if (arg == "--class-loss-weight") {
             if (!parse_float(value, task_config.class_loss_weight)) {
                 return false;
@@ -653,6 +659,37 @@ vvm::ReadoutMetrics evaluate_mlp_readout(const vvm::MlpReadout& readout,
     return metrics;
 }
 
+struct AutoencoderMetrics {
+    float loss = 0.0F;
+    float image_loss = 0.0F;
+    std::size_t samples = 0;
+};
+
+AutoencoderMetrics evaluate_autoencoder(const vvm::MlpAutoencoder& autoencoder,
+                                        std::span<const vvm::TaskSample> samples) {
+    AutoencoderMetrics metrics{};
+    for (const vvm::TaskSample& sample : samples) {
+        const std::vector<float> predicted = autoencoder.predict(sample.input);
+        metrics.loss += autoencoder.loss_one(sample.input, sample.input);
+
+        const std::size_t image_dims =
+            sample.class_offset > 0U ? sample.class_offset : sample.input.size();
+        float image_loss = 0.0F;
+        for (std::size_t i = 0; i < image_dims; ++i) {
+            const float error = predicted[i] - sample.input[i];
+            image_loss += error * error;
+        }
+        metrics.image_loss += image_loss / static_cast<float>(image_dims);
+        ++metrics.samples;
+    }
+
+    if (metrics.samples > 0U) {
+        metrics.loss /= static_cast<float>(metrics.samples);
+        metrics.image_loss /= static_cast<float>(metrics.samples);
+    }
+    return metrics;
+}
+
 float span_delta_l2(std::span<const float> before, std::span<const float> after) {
     if (before.size() != after.size()) {
         throw std::invalid_argument("span_delta_l2 requires equal sizes");
@@ -723,6 +760,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " affinity_retain_underuse_scale=" << task_config.affinity_retain_underuse_scale
               << " op_anchor_scale=" << task_config.op_anchor_scale
               << " anchor_to_best=" << (cli_options.anchor_to_best ? 1 : 0)
+              << " world_loss_weight=" << task_config.world_loss_weight
               << " class_value_scale=" << task_config.class_value_scale
               << " class_loss_weight=" << task_config.class_loss_weight
               << " restore_best=" << (cli_options.restore_best ? 1 : 0)
@@ -950,6 +988,52 @@ int run_mlp_training(const vvm::Config& config, const vvm::TaskConfig& task_conf
     return 0;
 }
 
+int run_autoencoder_training(const vvm::Config& config, const vvm::TaskConfig& task_config,
+                             const CliOptions& cli_options) {
+    const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+
+    vvm::MlpAutoencoder autoencoder(vvm::ReadoutConfig{
+        .input_dim = config.state_dim,
+        .hidden_dim = cli_options.hidden_dim,
+        .learning_rate = cli_options.readout_learning_rate,
+    });
+
+    std::cout << "autoencoder task=" << vvm::task_name(task_config.task)
+              << " epochs=" << cli_options.epochs << " train_samples=" << dataset.train.size()
+              << " test_samples=" << dataset.test.size() << " input_dim=" << config.state_dim
+              << " hidden=" << cli_options.hidden_dim << " lr=" << cli_options.readout_learning_rate
+              << " params=" << autoencoder.parameter_count() << '\n';
+
+    std::vector<std::size_t> order(dataset.train.size());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        order[i] = i;
+    }
+
+    for (std::size_t epoch = 0; epoch < cli_options.epochs; ++epoch) {
+        std::mt19937 shuffle_rng(task_config.seed ^ static_cast<std::uint32_t>(epoch));
+        std::shuffle(order.begin(), order.end(), shuffle_rng);
+
+        float train_loss = 0.0F;
+        std::size_t trained = 0;
+        for (const std::size_t sample_index : order) {
+            const vvm::TaskSample& sample = dataset.train[sample_index];
+            train_loss += autoencoder.train_one(sample.input, sample.input);
+            ++trained;
+        }
+
+        if (trained > 0U) {
+            train_loss /= static_cast<float>(trained);
+        }
+
+        const AutoencoderMetrics test = evaluate_autoencoder(autoencoder, dataset.test);
+        std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << train_loss
+                  << " test_loss=" << test.loss << " test_image_loss=" << test.image_loss
+                  << " samples=" << test.samples << '\n';
+    }
+
+    return 0;
+}
+
 int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, std::size_t epochs) {
     struct BenchTask {
         vvm::TaskKind task = vvm::TaskKind::CopyInput;
@@ -1052,6 +1136,10 @@ int main(int argc, char** argv) {
 
         if (command == "train-mlp") {
             return run_mlp_training(config, task_config, cli_options);
+        }
+
+        if (command == "train-autoencoder") {
+            return run_autoencoder_training(config, task_config, cli_options);
         }
 
         if (command == "bench-tasks") {
