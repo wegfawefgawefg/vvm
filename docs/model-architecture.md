@@ -82,10 +82,11 @@ right camera -> shared eye connector -> state
 or copied and allowed to specialize.
 
 This does not mean MNIST should require a socket to learn anything. The
-no-socket MNIST task remains a useful probe: can the core op bank itself map an
-image-like state into a class-like state? The socket version is the next cleaner
-experiment because it asks whether class information is readable from state
-without forcing the entire state to become the label.
+no-socket MNIST task remains a useful probe: can the core op bank itself keep an
+image-like observation in state while making class information readable from that
+same state? The socket version is the next cleaner experiment because it measures
+loss through an attachable readout without forcing the raw state vector itself to
+literally equal the label.
 
 The first no-socket MNIST run exposed a likely architectural conflict rather
 than a dataset loader bug:
@@ -110,8 +111,13 @@ state[0..783]    image reconstruction region
 state[784..793]  digit registers
 ```
 
-This asks the same state to retain the sample and determine its class. It gives
-the op bank more information from the data than a label-only target.
+This is only a target layout, not a separate addressing/writing split. The whole
+state still addresses the next op, the chosen op updates the whole state, and
+the loss is measured on constrained dimensions. Reconstructing the image region
+is the world-model constraint. Setting class registers is an additional
+supervised constraint on the same signal path. Both losses push through the same
+state trajectory and selected op, with dimension weights controlling how much
+each constraint contributes.
 
 Current diagnostic ladder:
 
@@ -138,6 +144,13 @@ tasks keep reconstruction pressure on input dimensions while applying stronger
 loss to class registers. Binary MNIST improves with more ops and weighted class
 registers; a 512-op, 1024-sample run reached about 76% on `mnist-01`, but it is
 not solved yet.
+
+Optional truncated BPTT is available through `--bptt`. The default trainer is a
+local one-step update over the window, which is intentionally simple but does not
+propagate later loss backward through earlier state transitions. BPTT keeps the
+same architecture and sampled op choices, but it backpropagates state gradients
+through the recorded window so earlier selected ops can receive pressure from
+later constraints.
 
 Tuning notes:
 

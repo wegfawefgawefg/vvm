@@ -398,6 +398,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
     for (std::size_t i = 0; i < input.size(); ++i) {
         working_state[i] += config_.input_scale * input[i];
     }
+    std::vector<float> working_pre_state(working_state.begin(), working_state.end());
     normalize_l2(working_state);
 
     Prediction prediction = predict_from_working_state(working_state, rng);
@@ -418,6 +419,7 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
 
     Tick tick_result{
         .state_before = std::move(state_before),
+        .working_pre_state = std::move(working_pre_state),
         .working_state = std::move(working_state),
         .candidate_indices = std::move(prediction.retrieval.candidate_indices),
         .candidate_probs = std::move(prediction.retrieval.candidate_weights),
@@ -476,6 +478,58 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     float weight_sum = 0.0F;
     float error_sum = 0.0F;
 
+    auto add_loss_gradient = [this](const Tick& tick, float recency_weight,
+                                    std::vector<float>& grad_pred) {
+        if (tick.observation_weights.empty()) {
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                grad_pred[i] += recency_weight * 2.0F *
+                                (tick.predicted_state[i] - tick.observed_state[i]) /
+                                static_cast<float>(config_.state_dim);
+            }
+        } else {
+            float observation_weight_sum = 0.0F;
+            for (const float weight : tick.observation_weights) {
+                observation_weight_sum += weight;
+            }
+            if (observation_weight_sum > 0.0F) {
+                for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                    grad_pred[i] += recency_weight * 2.0F * tick.observation_weights[i] *
+                                    (tick.predicted_state[i] - tick.observed_state[i]) /
+                                    observation_weight_sum;
+                }
+            }
+        }
+    };
+
+    auto add_rejection_gradient = [this, &gradients, &train_config](const Tick& tick,
+                                                                    float recency_weight) {
+        const float rejection_excess = tick.prediction_error - train_config.rejection_threshold;
+        if (train_config.rejection_scale <= 0.0F || rejection_excess <= 0.0F ||
+            tick.working_state.empty()) {
+            return;
+        }
+
+        float usage_multiplier = 1.0F;
+        if (train_config.rejection_overuse_scale > 0.0F && !train_config.op_usage_counts.empty()) {
+            std::size_t total_usage = 0;
+            for (const std::size_t count : train_config.op_usage_counts) {
+                total_usage += count;
+            }
+            const float expected_usage = std::max(1.0F, static_cast<float>(total_usage) /
+                                                            static_cast<float>(config_.num_ops));
+            const float op_usage = static_cast<float>(train_config.op_usage_counts[tick.chosen_op]);
+            const float overuse = std::max(0.0F, (op_usage - expected_usage) / expected_usage);
+            usage_multiplier = train_config.rejection_overuse_scale * overuse;
+        }
+
+        const float rejection =
+            recency_weight * train_config.rejection_scale * rejection_excess * usage_multiplier;
+        const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+        for (std::size_t i = 0; i < config_.state_dim; ++i) {
+            gradients[op_offset + i] += rejection * tick.working_state[i];
+        }
+    };
+
     for (std::size_t tick_index = 0; tick_index < ticks.size(); ++tick_index) {
         const Tick& tick = ticks[tick_index];
         if (tick.predicted_state.size() != config_.state_dim ||
@@ -486,6 +540,12 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         }
         if (!tick.working_state.empty() && tick.working_state.size() != config_.state_dim) {
             throw std::invalid_argument("tick working_state is incompatible with model config");
+        }
+        if (train_config.backprop_through_state &&
+            (tick.state_before.size() != config_.state_dim ||
+             tick.working_pre_state.size() != config_.state_dim)) {
+            throw std::invalid_argument(
+                "tick state history is required for backprop_through_state");
         }
         if (!tick.observation_weights.empty() &&
             tick.observation_weights.size() != config_.state_dim) {
@@ -498,61 +558,6 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         weighted_loss += recency_weight * tick.prediction_error;
         weight_sum += recency_weight;
         error_sum += tick.prediction_error;
-
-        std::vector<float> grad_pred(config_.state_dim, 0.0F);
-        if (tick.observation_weights.empty()) {
-            for (std::size_t i = 0; i < config_.state_dim; ++i) {
-                grad_pred[i] = recency_weight * 2.0F *
-                               (tick.predicted_state[i] - tick.observed_state[i]) /
-                               static_cast<float>(config_.state_dim);
-            }
-        } else {
-            float observation_weight_sum = 0.0F;
-            for (const float weight : tick.observation_weights) {
-                observation_weight_sum += weight;
-            }
-            if (observation_weight_sum > 0.0F) {
-                for (std::size_t i = 0; i < config_.state_dim; ++i) {
-                    grad_pred[i] = recency_weight * 2.0F * tick.observation_weights[i] *
-                                   (tick.predicted_state[i] - tick.observed_state[i]) /
-                                   observation_weight_sum;
-                }
-            }
-        }
-
-        std::vector<float> grad_post =
-            normalize_backward(tick.predicted_state, tick.post_activation, grad_pred);
-
-        const std::size_t op_offset = tick.chosen_op * config_.state_dim;
-        for (std::size_t i = 0; i < config_.state_dim; ++i) {
-            gradients[op_offset + i] += config_.update_scale *
-                                        activation_derivative(tick.pre_activation[i], config_) *
-                                        grad_post[i];
-        }
-
-        const float rejection_excess = tick.prediction_error - train_config.rejection_threshold;
-        if (train_config.rejection_scale > 0.0F && rejection_excess > 0.0F &&
-            !tick.working_state.empty()) {
-            float usage_multiplier = 1.0F;
-            if (train_config.rejection_overuse_scale > 0.0F &&
-                !train_config.op_usage_counts.empty()) {
-                std::size_t total_usage = 0;
-                for (const std::size_t count : train_config.op_usage_counts) {
-                    total_usage += count;
-                }
-                const float expected_usage = std::max(
-                    1.0F, static_cast<float>(total_usage) / static_cast<float>(config_.num_ops));
-                const float op_usage =
-                    static_cast<float>(train_config.op_usage_counts[tick.chosen_op]);
-                const float overuse = std::max(0.0F, (op_usage - expected_usage) / expected_usage);
-                usage_multiplier = train_config.rejection_overuse_scale * overuse;
-            }
-            const float rejection =
-                recency_weight * train_config.rejection_scale * rejection_excess * usage_multiplier;
-            for (std::size_t i = 0; i < config_.state_dim; ++i) {
-                gradients[op_offset + i] += rejection * tick.working_state[i];
-            }
-        }
         ++op_counts[tick.chosen_op];
     }
 
@@ -561,6 +566,60 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
             .op_update_l2_by_op = std::vector<float>(config_.num_ops, 0.0F),
             .tick_count = ticks.size(),
         };
+    }
+
+    if (train_config.backprop_through_state) {
+        std::vector<float> grad_state_next(config_.state_dim, 0.0F);
+        for (std::size_t reverse_index = ticks.size(); reverse_index > 0U; --reverse_index) {
+            const std::size_t tick_index = reverse_index - 1U;
+            const Tick& tick = ticks[tick_index];
+            const std::size_t age = ticks.size() - 1U - tick_index;
+            const float recency_weight =
+                std::pow(train_config.recency_decay, static_cast<float>(age));
+
+            std::vector<float> grad_pred(config_.state_dim, 0.0F);
+            add_loss_gradient(tick, recency_weight, grad_pred);
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                grad_pred[i] += grad_state_next[i];
+            }
+
+            std::vector<float> grad_post =
+                normalize_backward(tick.predicted_state, tick.post_activation, grad_pred);
+
+            std::vector<float> grad_working(config_.state_dim, 0.0F);
+            const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                const float grad_pre =
+                    activation_derivative(tick.pre_activation[i], config_) * grad_post[i];
+                gradients[op_offset + i] += config_.update_scale * grad_pre;
+                grad_working[i] += grad_pre;
+            }
+            grad_state_next =
+                normalize_backward(tick.working_state, tick.working_pre_state, grad_working);
+            add_rejection_gradient(tick, recency_weight);
+        }
+    } else {
+        for (std::size_t tick_index = 0; tick_index < ticks.size(); ++tick_index) {
+            const Tick& tick = ticks[tick_index];
+            const std::size_t age = ticks.size() - 1U - tick_index;
+            const float recency_weight =
+                std::pow(train_config.recency_decay, static_cast<float>(age));
+
+            std::vector<float> grad_pred(config_.state_dim, 0.0F);
+            add_loss_gradient(tick, recency_weight, grad_pred);
+
+            std::vector<float> grad_post =
+                normalize_backward(tick.predicted_state, tick.post_activation, grad_pred);
+
+            const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                gradients[op_offset + i] += config_.update_scale *
+                                            activation_derivative(tick.pre_activation[i], config_) *
+                                            grad_post[i];
+            }
+
+            add_rejection_gradient(tick, recency_weight);
+        }
     }
 
     std::size_t updated_ops = 0;

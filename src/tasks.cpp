@@ -321,9 +321,8 @@ void append_mnist_binary_split(std::vector<TaskSample>& samples,
     };
     std::array<std::size_t, 2> seen_counts = {};
     std::array<unsigned char, 784> pixels = {};
-    for (std::size_t i = 0; i < image_count &&
-                            (seen_counts[0] < target_counts[0] ||
-                             seen_counts[1] < target_counts[1]);
+    for (std::size_t i = 0; i < image_count && (seen_counts[0] < target_counts[0] ||
+                                                seen_counts[1] < target_counts[1]);
          ++i) {
         unsigned char label = 0;
         images.read(reinterpret_cast<char*>(pixels.data()),
@@ -333,9 +332,8 @@ void append_mnist_binary_split(std::vector<TaskSample>& samples,
             throw std::runtime_error("truncated MNIST IDX files in " +
                                      images_path.parent_path().string());
         }
-        if (label <= 1U &&
-            seen_counts[static_cast<std::size_t>(label)] <
-                target_counts[static_cast<std::size_t>(label)]) {
+        if (label <= 1U && seen_counts[static_cast<std::size_t>(label)] <
+                               target_counts[static_cast<std::size_t>(label)]) {
             samples.push_back(make_mnist_binary_sample(pixels, label, state_dim, task_config));
             ++seen_counts[static_cast<std::size_t>(label)];
         }
@@ -845,15 +843,16 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     }
 
     TrainConfig train_config{};
-    train_config.learning_rate = task_config.learning_rate *
-                                 std::pow(task_config.learning_rate_decay,
-                                          static_cast<float>(epoch));
+    train_config.learning_rate =
+        task_config.learning_rate *
+        std::pow(task_config.learning_rate_decay, static_cast<float>(epoch));
     train_config.recency_decay = task_config.recency_decay;
     train_config.max_grad_norm = task_config.max_grad_norm;
     train_config.rejection_scale = task_config.rejection_scale *
                                    std::pow(task_config.rejection_decay, static_cast<float>(epoch));
     train_config.rejection_threshold = task_config.rejection_threshold;
     train_config.rejection_overuse_scale = task_config.rejection_overuse_scale;
+    train_config.backprop_through_state = task_config.backprop_through_state;
 
     std::mt19937 rng(task_config.seed ^ static_cast<std::uint32_t>(epoch * 0x9E3779B9U));
     std::vector<std::size_t> order(train_samples.size());

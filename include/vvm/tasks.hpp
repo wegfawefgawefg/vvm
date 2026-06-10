@@ -58,6 +58,7 @@ struct TaskConfig {
     float rejection_overuse_scale = 0.0F;
     float class_value_scale = 2.0F;
     float class_loss_weight = 0.0F;
+    bool backprop_through_state = false;
     VectorRange vector_range = VectorRange::Signed;
     std::string mnist_dir = "resources/mnist";
     std::uint32_t seed = 0x51A7E5U;

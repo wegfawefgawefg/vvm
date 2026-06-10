@@ -282,8 +282,55 @@ void test_repeated_identical_ticks_do_not_shrink_update() {
 
     assert(one_tick_result.updated_ops == 1U);
     assert(repeated_tick_result.updated_ops == 1U);
-    assert(std::fabs(one_tick_result.learning_update_l2 -
-                     repeated_tick_result.learning_update_l2) < 1.0e-5F);
+    assert(std::fabs(one_tick_result.learning_update_l2 - repeated_tick_result.learning_update_l2) <
+           1.0e-5F);
+}
+
+void test_backprop_through_state_window_runs() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.update_scale = 1.0F;
+    config.sample_retrieval = false;
+    config.state_heat_stddev = 0.0F;
+    config.op_heat_stddev = 0.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+
+    std::vector<vvm::Tick> window;
+    window.push_back(model.tick(state, rng, 0));
+    vvm::Tick final_tick = model.tick(state, rng, 1);
+
+    std::vector<float> target = final_tick.predicted_state;
+    std::size_t active_index = 0;
+    for (std::size_t i = 0; i < final_tick.post_activation.size(); ++i) {
+        if (std::fabs(final_tick.post_activation[i]) > 0.0F) {
+            active_index = i;
+            break;
+        }
+    }
+    target[active_index] += 0.25F;
+    const float target_norm = vvm::l2_norm(target);
+    for (float& value : target) {
+        value /= target_norm;
+    }
+    vvm::apply_observation(final_tick, target, config.curiosity_scale);
+    window.push_back(std::move(final_tick));
+
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 0.1F;
+    train_config.max_grad_norm = 10.0F;
+    train_config.backprop_through_state = true;
+    const vvm::TrainResult result = model.train_window(window, train_config);
+
+    assert(result.tick_count == window.size());
+    assert(result.updated_ops > 0U);
+    assert(std::isfinite(result.loss));
+    assert(std::isfinite(result.learning_update_l2));
+    assert(result.learning_update_l2 > 0.0F);
 }
 
 void test_rejection_lowers_bad_op_affinity() {
@@ -412,6 +459,7 @@ int main() {
     test_train_window_updates_only_chosen_ops();
     test_train_window_moves_prediction_toward_observation();
     test_repeated_identical_ticks_do_not_shrink_update();
+    test_backprop_through_state_window_runs();
     test_rejection_lowers_bad_op_affinity();
     test_observation_creates_curiosity_without_heat();
     test_task_training_runs(vvm::TaskKind::CopyInput, 0U);

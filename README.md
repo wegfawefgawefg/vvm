@@ -79,8 +79,11 @@ from high-loss query/op matches, so failed ops stop monopolizing the same region
 of state space.
 
 MNIST v0 maps each 28x28 image into the first 784 state dimensions and trains a
-mixed target: reconstruct the image region and set 10 digit registers in
-`state[784..793]`. The CLI reports exact `test_accuracy` for class-like tasks.
+mixed target: reconstruct the image region as a world-model constraint and set
+10 digit registers in `state[784..793]` as a supervised readout constraint. The
+whole state still addresses the op bank; the registers are loss/readout
+dimensions, not a separate control path. The CLI reports exact `test_accuracy`
+for class-like tasks.
 Task evaluation uses deterministic nearest-op retrieval so reported test metrics
 are stable; training may still sample among top candidates unless
 `--hard-retrieval` is passed.

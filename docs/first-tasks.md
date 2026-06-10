@@ -78,9 +78,12 @@ next observation target:
     train the model to predict the next external observation or socket value
 ```
 
-State targets are useful for early debugging. Readout targets are closer to
-real control and perception. Next observation targets are the core world-model
-training signal.
+State targets are useful for early debugging. They are not meant to divide the
+VM into isolated regions where one part addresses and another part writes. They
+mean "measure this constraint on these dimensions" while the whole recurrent
+state and selected op path receive the gradient/update pressure. Readout targets
+are closer to real control and perception. Next observation targets are the core
+world-model training signal.
 
 ## Task Ladder
 
@@ -214,14 +217,14 @@ There is also a binary MNIST probe:
 
 This first version is VVM-native rather than a standard classifier head: the
 image is embedded into `state[0..783]`, and the target both reconstructs that
-image region and writes the label into digit registers at `state[784..793]`.
-Exact `test_accuracy` is reported from those registers.
+image region and constrains digit registers at `state[784..793]`. Exact
+`test_accuracy` is reported from those registers.
 
 Early result: the loader/training path works, but pure label-prototype MNIST
 stayed near random accuracy. That version made the image query and digit target
-too dissimilar. The current probe preserves image state and adds digit
-registers so the core gets both sample reconstruction and class determination
-pressure.
+too dissimilar. The current probe preserves image state and adds digit-register
+constraints so the core gets both sample reconstruction/world-model pressure and
+class determination pressure from the same state trajectory.
 
 Latest no-socket result: `mnist-01` improves with weighted class-register loss
 and more ops. A 512-op, 1024-sample run reached about 76% with broad op usage,

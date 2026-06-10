@@ -50,6 +50,7 @@ struct RewardSignal {
 
 struct Tick {
     std::vector<float> state_before;
+    std::vector<float> working_pre_state;
     std::vector<float> working_state;
     std::vector<std::size_t> candidate_indices;
     std::vector<float> candidate_probs;
@@ -100,6 +101,7 @@ struct TrainConfig {
     float rejection_overuse_scale = 0.0F;
     std::span<const std::size_t> op_usage_counts = {};
     bool average_repeated_ops = false;
+    bool backprop_through_state = false;
 };
 
 struct TrainResult {

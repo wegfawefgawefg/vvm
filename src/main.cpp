@@ -48,7 +48,7 @@ void print_usage() {
                  "[--idle-frames N] [--window N] [--lr F] [--lr-decay F] "
                  "[--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
-                 "[--rejection-overuse-scale F]\n"
+                 "[--rejection-overuse-scale F] [--bptt]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
@@ -189,6 +189,14 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
         const std::string_view arg(args[i]);
         if (arg == "--hard-retrieval" || arg == "--greedy-retrieval") {
             config.sample_retrieval = false;
+            continue;
+        }
+        if (arg == "--bptt" || arg == "--backprop-through-state") {
+            task_config.backprop_through_state = true;
+            continue;
+        }
+        if (arg == "--local-bp" || arg == "--local-backprop") {
+            task_config.backprop_through_state = false;
             continue;
         }
         if (arg == "--sample-retrieval") {
@@ -455,8 +463,7 @@ void print_class_top_counts(std::span<const std::size_t> counts, std::size_t cla
             std::cout << ';';
         }
         std::cout << label << ':';
-        const std::span<const std::size_t> class_counts(counts.data() + (label * num_ops),
-                                                        num_ops);
+        const std::span<const std::size_t> class_counts(counts.data() + (label * num_ops), num_ops);
         std::vector<std::pair<std::size_t, std::size_t>> ranked;
         ranked.reserve(num_ops);
         for (std::size_t op = 0; op < num_ops; ++op) {
@@ -599,6 +606,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " rejection_overuse_scale=" << task_config.rejection_overuse_scale
               << " class_value_scale=" << task_config.class_value_scale
               << " class_loss_weight=" << task_config.class_loss_weight
+              << " bptt=" << (task_config.backprop_through_state ? 1 : 0)
               << " params=" << model.parameter_count() << '\n';
 
     float best_accuracy = -1.0F;
@@ -627,11 +635,11 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                 best_balanced_accuracy_epoch = epoch;
             }
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
-            std::cout << " best_accuracy=" << (100.0F * best_accuracy) << "%"
-                      << "@" << best_accuracy_epoch;
+            std::cout << " best_accuracy=" << (100.0F * best_accuracy) << "%" << "@"
+                      << best_accuracy_epoch;
             std::cout << " balanced_accuracy=" << (100.0F * loss.test_balanced_accuracy) << "%"
-                      << " best_balanced=" << (100.0F * best_balanced_accuracy) << "%"
-                      << "@" << best_balanced_accuracy_epoch;
+                      << " best_balanced=" << (100.0F * best_balanced_accuracy) << "%" << "@"
+                      << best_balanced_accuracy_epoch;
             std::cout << " class_margin=" << loss.mean_class_margin;
             print_counts("labels", loss.label_counts);
             print_counts("preds", loss.prediction_counts);
