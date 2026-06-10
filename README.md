@@ -88,21 +88,19 @@ Task evaluation uses deterministic nearest-op retrieval so reported test metrics
 are stable; training may still sample among top candidates unless
 `--hard-retrieval` is passed.
 `mnist-01` uses the same image region with a balanced two-class split for
-digits 0 and 1. `train-task` also reports heat L2, summed learning update L2, actual op-bank
-delta L2 for the epoch, total drift from initialization, selected op count, max
-op reuse, normalized op-selection entropy, and per-op pressure. Pressure is
-tracked as selection count, heat delta L2 sum, and training delta L2 sum for
-each op; the CLI prints the highest single op plus top-three `top_select`,
-`top_train`, and `top_heat` summaries each epoch. For class tasks it also prints
-label and prediction counts plus `balanced_accuracy`. `--hard-retrieval` uses the nearest op
-deterministically instead of sampling among top candidates. `--class-value-scale`,
-`--class-loss-weight`, and `--rejection-decay` are tuning knobs for register
-targets and anti-collapse pressure. `--rejection-overuse-scale` makes rejection
-focus on ops that are over-selected relative to the current epoch's usage
-distribution. Class tasks also report `class_margin`, the mean true-class
-register score minus the best other-class score. `--lr-decay` decays the task
-learning rate by epoch; it helps test whether useful early routes drift because
-updates remain too large.
+digits 0 and 1. `train-task` also reports heat L2, summed learning update L2,
+actual op-bank delta L2 for the epoch, total drift from initialization, selected
+op count, max op reuse, normalized op-selection entropy, and per-op pressure.
+Pressure is tracked as selection count, heat delta L2 sum, and training delta L2
+sum for each op; the CLI prints the highest single op plus top-three
+`top_select`, `top_train`, and `top_heat` summaries each epoch. For class tasks
+it also prints label and prediction counts, `balanced_accuracy`,
+`class_margin`, `test_nonclass_loss`, and `test_class_loss`. `--hard-retrieval`
+uses the nearest op deterministically instead of sampling among top candidates.
+`--class-value-scale`, `--class-loss-weight`, `--lr-decay`, `--momentum`, and
+`--rejection-decay` are tuning knobs for register targets and anti-collapse
+pressure. `--rejection-overuse-scale` makes rejection focus on ops that are
+over-selected relative to the current epoch's usage distribution.
 
 ## Layout
 

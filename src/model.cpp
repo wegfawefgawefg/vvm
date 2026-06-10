@@ -176,6 +176,7 @@ Model::Model(Config config) : config_(config) {
     std::normal_distribution<float> init(0.0F, 0.02F);
 
     op_bank_.resize(config_.num_ops * config_.state_dim);
+    op_velocity_.assign(op_bank_.size(), 0.0F);
 
     for (float& value : op_bank_) {
         value = init(rng);
@@ -448,6 +449,9 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     if (train_config.learning_rate < 0.0F) {
         throw std::invalid_argument("learning_rate must be nonnegative");
     }
+    if (train_config.momentum < 0.0F || train_config.momentum >= 1.0F) {
+        throw std::invalid_argument("momentum must be in [0, 1)");
+    }
     if (train_config.recency_decay < 0.0F || train_config.recency_decay > 1.0F) {
         throw std::invalid_argument("recency_decay must be in [0, 1]");
     }
@@ -654,8 +658,16 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         }
 
         for (std::size_t i = 0; i < config_.state_dim; ++i) {
-            op_bank_[op_offset + i] -=
-                train_config.learning_rate * clip_scale * gradients[op_offset + i];
+            const std::size_t offset = op_offset + i;
+            const float update_gradient = clip_scale * gradients[offset];
+            if (train_config.momentum > 0.0F) {
+                op_velocity_[offset] =
+                    (train_config.momentum * op_velocity_[offset]) + update_gradient;
+                op_bank_[offset] -= train_config.learning_rate * op_velocity_[offset];
+            } else {
+                op_velocity_[offset] = 0.0F;
+                op_bank_[offset] -= train_config.learning_rate * update_gradient;
+            }
         }
         normalize_op(op);
         float op_update_norm_sq = 0.0F;

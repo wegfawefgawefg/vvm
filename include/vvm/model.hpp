@@ -94,6 +94,7 @@ struct RunResult {
 
 struct TrainConfig {
     float learning_rate = 0.01F;
+    float momentum = 0.0F;
     float recency_decay = 0.97F;
     float max_grad_norm = 1.0F;
     float rejection_scale = 0.0F;
@@ -166,6 +167,7 @@ class Model {
 
     Config config_;
     std::vector<float> op_bank_;
+    std::vector<float> op_velocity_;
 };
 
 [[nodiscard]] float l2_norm(std::span<const float> values);

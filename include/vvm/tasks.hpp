@@ -50,6 +50,7 @@ struct TaskConfig {
     std::size_t window_size = 8;
     float learning_rate = 0.05F;
     float learning_rate_decay = 1.0F;
+    float momentum = 0.0F;
     float recency_decay = 0.97F;
     float max_grad_norm = 1.0F;
     float rejection_scale = 0.0F;
@@ -66,6 +67,8 @@ struct TaskConfig {
 
 struct EvalMetrics {
     float loss = 0.0F;
+    float nonclass_loss = 0.0F;
+    float class_loss = 0.0F;
     float accuracy = 0.0F;
     float balanced_accuracy = 0.0F;
     float mean_class_margin = 0.0F;
@@ -78,6 +81,8 @@ struct LossPoint {
     float train_loss = 0.0F;
     float self_loss = 0.0F;
     float test_loss = 0.0F;
+    float test_nonclass_loss = 0.0F;
+    float test_class_loss = 0.0F;
     float test_accuracy = 0.0F;
     float test_balanced_accuracy = 0.0F;
     float mean_class_margin = 0.0F;

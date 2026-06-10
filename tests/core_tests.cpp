@@ -333,6 +333,46 @@ void test_backprop_through_state_window_runs() {
     assert(result.learning_update_l2 > 0.0F);
 }
 
+void test_train_window_momentum_runs() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.update_scale = 1.0F;
+    config.sample_retrieval = false;
+    config.state_heat_stddev = 0.0F;
+    config.op_heat_stddev = 0.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    vvm::Tick tick = model.tick(state, rng, 0);
+
+    std::vector<float> target = tick.predicted_state;
+    target[0] += 0.25F;
+    const float target_norm = vvm::l2_norm(target);
+    for (float& value : target) {
+        value /= target_norm;
+    }
+    vvm::apply_observation(tick, target, config.curiosity_scale);
+
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 0.05F;
+    train_config.momentum = 0.9F;
+    train_config.max_grad_norm = 10.0F;
+
+    const vvm::TrainResult first =
+        model.train_window(std::span<const vvm::Tick>(&tick, 1), train_config);
+    const vvm::TrainResult second =
+        model.train_window(std::span<const vvm::Tick>(&tick, 1), train_config);
+
+    assert(first.updated_ops == 1U);
+    assert(second.updated_ops == 1U);
+    assert(std::isfinite(first.learning_update_l2));
+    assert(std::isfinite(second.learning_update_l2));
+    assert(second.learning_update_l2 > 0.0F);
+}
+
 void test_rejection_lowers_bad_op_affinity() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -460,6 +500,7 @@ int main() {
     test_train_window_moves_prediction_toward_observation();
     test_repeated_identical_ticks_do_not_shrink_update();
     test_backprop_through_state_window_runs();
+    test_train_window_momentum_runs();
     test_rejection_lowers_bad_op_affinity();
     test_observation_creates_curiosity_without_heat();
     test_task_training_runs(vvm::TaskKind::CopyInput, 0U);

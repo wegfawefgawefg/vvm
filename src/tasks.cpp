@@ -667,6 +667,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.learning_rate_decay < 0.0F || task_config.learning_rate_decay > 1.0F) {
         throw std::invalid_argument("learning_rate_decay must be in [0, 1]");
     }
+    if (task_config.momentum < 0.0F || task_config.momentum >= 1.0F) {
+        throw std::invalid_argument("momentum must be in [0, 1)");
+    }
     if (task_config.rejection_decay < 0.0F || task_config.rejection_decay > 1.0F) {
         throw std::invalid_argument("rejection_decay must be in [0, 1]");
     }
@@ -738,6 +741,10 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
     }
 
     float loss_sum = 0.0F;
+    float nonclass_loss_sum = 0.0F;
+    float class_loss_sum = 0.0F;
+    std::size_t nonclass_loss_samples = 0;
+    std::size_t class_loss_samples = 0;
     float class_margin_sum = 0.0F;
     std::size_t correct = 0;
     std::size_t accuracy_samples = 0;
@@ -765,6 +772,34 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
                 ? Model::prediction_error(state, samples[i].target)
                 : Model::prediction_error(state, samples[i].target, samples[i].target_weights);
         if (samples[i].label >= 0 && samples[i].class_count > 0) {
+            float class_error_sum = 0.0F;
+            float class_weight_sum = 0.0F;
+            float nonclass_error_sum = 0.0F;
+            float nonclass_weight_sum = 0.0F;
+            const std::size_t class_begin = samples[i].class_offset;
+            const std::size_t class_end =
+                class_begin + static_cast<std::size_t>(samples[i].class_count);
+            for (std::size_t dim = 0; dim < state.size(); ++dim) {
+                const float weight =
+                    samples[i].target_weights.empty() ? 1.0F : samples[i].target_weights[dim];
+                const float error = samples[i].target[dim] - state[dim];
+                if (dim >= class_begin && dim < class_end) {
+                    class_error_sum += weight * error * error;
+                    class_weight_sum += weight;
+                } else {
+                    nonclass_error_sum += weight * error * error;
+                    nonclass_weight_sum += weight;
+                }
+            }
+            if (class_weight_sum > 0.0F) {
+                class_loss_sum += class_error_sum / class_weight_sum;
+                ++class_loss_samples;
+            }
+            if (nonclass_weight_sum > 0.0F) {
+                nonclass_loss_sum += nonclass_error_sum / nonclass_weight_sum;
+                ++nonclass_loss_samples;
+            }
+
             const int predicted = predicted_class(
                 state, samples[i].class_count, samples[i].class_offset, task_config.vector_range);
             const float label_score =
@@ -811,6 +846,12 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
 
     return EvalMetrics{
         .loss = loss_sum / static_cast<float>(samples.size()),
+        .nonclass_loss = nonclass_loss_samples == 0U
+                             ? 0.0F
+                             : nonclass_loss_sum / static_cast<float>(nonclass_loss_samples),
+        .class_loss = class_loss_samples == 0U
+                          ? 0.0F
+                          : class_loss_sum / static_cast<float>(class_loss_samples),
         .accuracy = accuracy_samples == 0U
                         ? 0.0F
                         : static_cast<float>(correct) / static_cast<float>(accuracy_samples),
@@ -835,6 +876,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         const EvalMetrics metrics = evaluate_task_metrics(model, test_samples, task_config);
         LossPoint loss{};
         loss.test_loss = metrics.loss;
+        loss.test_nonclass_loss = metrics.nonclass_loss;
+        loss.test_class_loss = metrics.class_loss;
         loss.test_accuracy = metrics.accuracy;
         loss.test_balanced_accuracy = metrics.balanced_accuracy;
         loss.accuracy_samples = metrics.accuracy_samples;
@@ -846,6 +889,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     train_config.learning_rate =
         task_config.learning_rate *
         std::pow(task_config.learning_rate_decay, static_cast<float>(epoch));
+    train_config.momentum = task_config.momentum;
     train_config.recency_decay = task_config.recency_decay;
     train_config.max_grad_norm = task_config.max_grad_norm;
     train_config.rejection_scale = task_config.rejection_scale *
@@ -936,6 +980,8 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
     diagnostics.self_loss =
         self_ticks == 0U ? 0.0F : self_loss_sum / static_cast<float>(self_ticks);
     diagnostics.test_loss = metrics.loss;
+    diagnostics.test_nonclass_loss = metrics.nonclass_loss;
+    diagnostics.test_class_loss = metrics.class_loss;
     diagnostics.test_accuracy = metrics.accuracy;
     diagnostics.test_balanced_accuracy = metrics.balanced_accuracy;
     diagnostics.mean_class_margin = metrics.mean_class_margin;

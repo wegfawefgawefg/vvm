@@ -46,7 +46,7 @@ void print_usage() {
                  "sine-next|mnist-01|mnist] "
                  "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
                  "[--idle-frames N] [--window N] [--lr F] [--lr-decay F] "
-                 "[--class-loss-weight F] "
+                 "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F] [--bptt]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
@@ -309,6 +309,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--lr-decay" || arg == "--learning-rate-decay") {
             if (!parse_float(value, task_config.learning_rate_decay)) {
+                return false;
+            }
+        } else if (arg == "--momentum") {
+            if (!parse_float(value, task_config.momentum)) {
                 return false;
             }
         } else if (arg == "--recency-decay") {
@@ -600,6 +604,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " idle_frames=" << task_config.idle_frames_between_samples
               << " window=" << task_config.window_size << " lr=" << task_config.learning_rate
               << " lr_decay=" << task_config.learning_rate_decay
+              << " momentum=" << task_config.momentum
               << " rejection_scale=" << task_config.rejection_scale
               << " rejection_threshold=" << task_config.rejection_threshold
               << " rejection_decay=" << task_config.rejection_decay
@@ -626,6 +631,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                   << " self_loss=" << loss.self_loss << " test_loss=" << loss.test_loss
                   << " effective_lr=" << effective_lr;
         if (loss.accuracy_samples > 0U) {
+            std::cout << " test_nonclass_loss=" << loss.test_nonclass_loss
+                      << " test_class_loss=" << loss.test_class_loss;
             if (loss.test_accuracy > best_accuracy) {
                 best_accuracy = loss.test_accuracy;
                 best_accuracy_epoch = epoch;

@@ -158,6 +158,7 @@ Tuning notes:
 - `--class-value-scale` changes the class register target amplitude before
   target normalization.
 - `--lr-decay` reduces learning rate by epoch.
+- `--momentum` enables optimizer momentum over op-bank updates.
 - `--rejection-decay` reduces rejection pressure by epoch.
 
 Quick sweeps show that raising `--class-loss-weight` from the default binary
@@ -165,6 +166,27 @@ MNIST value to 512 does not solve the task by itself. Rejection is still needed
 to avoid op collapse, but persistent rejection can drag learned attractors. The
 next likely fix is making rejection conditional on local overuse or decaying it
 based on measured op entropy rather than blindly by epoch.
+
+Evaluation now reports `test_nonclass_loss` and `test_class_loss` for class
+tasks. On `mnist-01`, nonclass/image reconstruction loss is already tiny
+(around `0.0011`) while class-register loss stays much larger (around
+`0.36-0.40`). The failure is not that the VM cannot preserve the image-like
+observation; it is specifically the class-register steering and route stability.
+
+Current best 256-op binary MNIST probe:
+
+```text
+--ops 256 --candidates 16 --sample-frames 8 --window 8
+--lr 0.0005 --lr-decay 0.5 --momentum 0.9
+--max-grad-norm 0.1 --update-scale 2.0
+--rejection-scale 0.02 --rejection-decay 0.5
+```
+
+This reached about `79.7%` balanced accuracy and held around `78.5%` after the
+learning rate decayed. Plain SGD under the same basic setup peaked lower or
+drifted harder. Larger banks (`512` ops) spread usage but performed worse with
+this schedule; smaller banks show a capacity boundary (`128` ops near `78%`,
+`64` ops near collapse/random).
 
 Usage-aware rejection is now available:
 
