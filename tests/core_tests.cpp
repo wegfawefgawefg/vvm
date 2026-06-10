@@ -188,6 +188,51 @@ void test_train_window_updates_only_chosen_ops() {
     assert(changed_ops == 1U);
 }
 
+void test_train_window_moves_prediction_toward_observation() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.update_scale = 1.0F;
+    config.sample_retrieval = false;
+    config.state_heat_stddev = 0.0F;
+    config.op_heat_stddev = 0.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    vvm::Tick tick = model.tick(state, rng, 0);
+
+    std::size_t active_index = 0;
+    for (std::size_t i = 0; i < tick.post_activation.size(); ++i) {
+        if (std::fabs(tick.post_activation[i]) > 0.0F) {
+            active_index = i;
+            break;
+        }
+    }
+
+    std::vector<float> target = tick.predicted_state;
+    target[active_index] += 0.25F;
+    const float target_norm = vvm::l2_norm(target);
+    for (float& value : target) {
+        value /= target_norm;
+    }
+    vvm::apply_observation(tick, target, config.curiosity_scale);
+    const float before_loss = vvm::Model::prediction_error(tick.predicted_state, target);
+
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 0.1F;
+    train_config.max_grad_norm = 10.0F;
+    const vvm::TrainResult result =
+        model.train_window(std::span<const vvm::Tick>(&tick, 1), train_config);
+    assert(result.updated_ops == 1U);
+
+    const std::vector<float> after_prediction = model.predict_next(tick.working_state);
+    const float after_loss = vvm::Model::prediction_error(after_prediction, target);
+
+    assert(after_loss < before_loss);
+}
+
 void test_rejection_lowers_bad_op_affinity() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -312,6 +357,7 @@ int main() {
     test_heat_creates_curiosity();
     test_tick_masks_missing_external_reward();
     test_train_window_updates_only_chosen_ops();
+    test_train_window_moves_prediction_toward_observation();
     test_rejection_lowers_bad_op_affinity();
     test_observation_creates_curiosity_without_heat();
     test_task_training_runs(vvm::TaskKind::CopyInput, 0U);
