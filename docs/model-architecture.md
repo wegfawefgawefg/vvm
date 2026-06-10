@@ -594,18 +594,9 @@ bootstrapped value target over the candidate choices available to VVM.
 7. Add value readout and truncated returns.
 8. Add candidate-policy learning only after the model can predict.
 
-## Activation Modes
+## Activation Policy
 
-VVM now supports four cheap activation modes:
-
-```text
-relu
-leaky-relu
-clamp
-deadzone
-```
-
-The default is `deadzone`:
+The main VVM architecture uses `deadzone`:
 
 ```text
 y = sign(x) * max(abs(x) - threshold, 0)
@@ -616,6 +607,18 @@ positive and negative values survive, and the derivative is either `0` in the
 dead band or `1` outside it. This keeps the implementation simple for manual
 training while avoiding the main issue with plain ReLU in a recurrent VM:
 negative state cannot persist through ticks.
+
+Other activation modes exist only as ablation/control modes:
+
+```text
+relu        old nonnegative control
+leaky-relu  signed ReLU-like control
+clamp       signed linear-ish control
+```
+
+They are useful for checking whether a failure is caused by the deadzone choice,
+but they should not be swapped per task. Activation is an architecture decision;
+tasks are probes.
 
 Modern feedforward nets get a lot of mileage from ReLU because it is cheap,
 stable, and avoids sigmoid/tanh saturation. They can still represent signed

@@ -24,7 +24,7 @@ void print_usage() {
     std::cout << "usage:\n"
               << "  vvm smoke\n"
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
-                 "[--activation relu|leaky-relu|clamp|deadzone] [--update-scale F] "
+                 "[--activation deadzone] [--update-scale F] "
                  "[--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--task copy-input|delayed-copy|alternating-bit|xor|sine-next] "
@@ -35,6 +35,9 @@ void print_usage() {
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm visualize-train [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--sample-frames N] [--idle-frames N] [--window N] [--lr F]\n";
+    std::cout << "notes:\n"
+              << "  deadzone is the main VVM activation. relu, leaky-relu, and clamp are "
+                 "ablation/control modes.\n";
 }
 
 bool parse_size(std::string_view value, std::size_t& out) {

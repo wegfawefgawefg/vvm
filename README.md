@@ -52,8 +52,10 @@ y = sign(x) * max(abs(x) - threshold, 0)
 ```
 
 It keeps the cheap threshold behavior of ReLU without erasing negative state
-every tick. `--activation relu|leaky-relu|clamp|deadzone` and
-`--vectors signed|nonnegative` are available for comparison.
+every tick. `deadzone` is the main VVM architecture path. The other activation
+modes are kept as ablation/control modes for sanity checks, not as knobs to tune
+per task. `--vectors signed|nonnegative` is also available for baseline
+comparison.
 
 Current generated tasks are `copy-input`, `delayed-copy`, `alternating-bit`,
 `xor`, and `sine-next`. `copy-input` shows an input vector for
