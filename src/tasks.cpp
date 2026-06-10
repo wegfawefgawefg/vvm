@@ -761,6 +761,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.rejection_overuse_scale < 0.0F) {
         throw std::invalid_argument("rejection_overuse_scale must be nonnegative");
     }
+    if (task_config.usage_repel_scale < 0.0F) {
+        throw std::invalid_argument("usage_repel_scale must be nonnegative");
+    }
     if (task_config.affinity_retain_scale < 0.0F) {
         throw std::invalid_argument("affinity_retain_scale must be nonnegative");
     }
@@ -994,6 +997,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
                                    std::pow(task_config.rejection_decay, static_cast<float>(epoch));
     train_config.rejection_threshold = task_config.rejection_threshold;
     train_config.rejection_overuse_scale = task_config.rejection_overuse_scale;
+    train_config.usage_repel_scale = task_config.usage_repel_scale;
     train_config.affinity_retain_scale = task_config.affinity_retain_scale;
     train_config.affinity_retain_threshold = task_config.affinity_retain_threshold;
     train_config.affinity_retain_underuse_scale = task_config.affinity_retain_underuse_scale;

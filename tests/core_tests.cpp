@@ -546,6 +546,44 @@ void test_rejection_lowers_bad_op_affinity() {
     assert(after_affinity < before_affinity);
 }
 
+void test_usage_repel_lowers_overused_op_affinity() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.update_scale = 1.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    vvm::Tick tick = model.tick(state, rng, 0);
+
+    tick.observed_state = tick.predicted_state;
+    tick.prediction_error = 0.0F;
+
+    const std::span<const float> before = model.op_bank();
+    const std::span<const float> before_op =
+        before.subspan(tick.chosen_op * config.state_dim, config.state_dim);
+    const float before_affinity = vvm::dot_product(before_op, tick.working_state);
+
+    std::vector<std::size_t> usage(config.num_ops, 1U);
+    usage[tick.chosen_op] = 100U;
+
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 0.5F;
+    train_config.max_grad_norm = 10.0F;
+    train_config.usage_repel_scale = 1.0F;
+    train_config.op_usage_counts = usage;
+    (void)model.train_window(std::span<const vvm::Tick>(&tick, 1), train_config);
+
+    const std::span<const float> after = model.op_bank();
+    const std::span<const float> after_op =
+        after.subspan(tick.chosen_op * config.state_dim, config.state_dim);
+    const float after_affinity = vvm::dot_product(after_op, tick.working_state);
+
+    assert(after_affinity < before_affinity);
+}
+
 void test_affinity_retain_raises_good_op_affinity() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -768,6 +806,7 @@ int main() {
     test_train_window_momentum_runs();
     test_weighted_gradient_matches_finite_difference_direction();
     test_rejection_lowers_bad_op_affinity();
+    test_usage_repel_lowers_overused_op_affinity();
     test_affinity_retain_raises_good_op_affinity();
     test_affinity_retain_underuse_gate_blocks_overused_op();
     test_op_anchor_pulls_selected_op_toward_anchor();

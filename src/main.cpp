@@ -54,7 +54,8 @@ void print_usage() {
                  "[--class-registers N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
                  "[--class-value-scale F] [--rejection-decay F] "
-                 "[--rejection-overuse-scale F] [--affinity-retain-scale F] "
+                 "[--rejection-overuse-scale F] [--usage-repel-scale F] "
+                 "[--affinity-retain-scale F] "
                  "[--affinity-retain-threshold F] [--affinity-retain-underuse-scale F] "
                  "[--op-anchor-scale F] [--anchor-to-best] [--bptt] [--restore-best]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
@@ -379,6 +380,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_float(value, task_config.rejection_overuse_scale)) {
                 return false;
             }
+        } else if (arg == "--usage-repel-scale") {
+            if (!parse_float(value, task_config.usage_repel_scale)) {
+                return false;
+            }
         } else if (arg == "--affinity-retain-scale") {
             if (!parse_float(value, task_config.affinity_retain_scale)) {
                 return false;
@@ -691,6 +696,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " rejection_threshold=" << task_config.rejection_threshold
               << " rejection_decay=" << task_config.rejection_decay
               << " rejection_overuse_scale=" << task_config.rejection_overuse_scale
+              << " usage_repel_scale=" << task_config.usage_repel_scale
               << " affinity_retain_scale=" << task_config.affinity_retain_scale
               << " affinity_retain_threshold=" << task_config.affinity_retain_threshold
               << " affinity_retain_underuse_scale=" << task_config.affinity_retain_underuse_scale

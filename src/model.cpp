@@ -508,6 +508,9 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     if (train_config.rejection_overuse_scale < 0.0F) {
         throw std::invalid_argument("rejection_overuse_scale must be nonnegative");
     }
+    if (train_config.usage_repel_scale < 0.0F) {
+        throw std::invalid_argument("usage_repel_scale must be nonnegative");
+    }
     if (train_config.affinity_retain_scale < 0.0F) {
         throw std::invalid_argument("affinity_retain_scale must be nonnegative");
     }
@@ -620,6 +623,32 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         }
     };
 
+    auto add_usage_repel_gradient = [this, &gradients, &train_config](const Tick& tick,
+                                                                      float recency_weight) {
+        if (train_config.usage_repel_scale <= 0.0F || train_config.op_usage_counts.empty() ||
+            tick.working_state.empty()) {
+            return;
+        }
+
+        std::size_t total_usage = 0;
+        for (const std::size_t count : train_config.op_usage_counts) {
+            total_usage += count;
+        }
+        const float expected_usage =
+            std::max(1.0F, static_cast<float>(total_usage) / static_cast<float>(config_.num_ops));
+        const float op_usage = static_cast<float>(train_config.op_usage_counts[tick.chosen_op]);
+        const float overuse = std::max(0.0F, (op_usage - expected_usage) / expected_usage);
+        if (overuse <= 0.0F) {
+            return;
+        }
+
+        const float repulsion = recency_weight * train_config.usage_repel_scale * overuse;
+        const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+        for (std::size_t i = 0; i < config_.state_dim; ++i) {
+            gradients[op_offset + i] += repulsion * tick.working_state[i];
+        }
+    };
+
     for (std::size_t tick_index = 0; tick_index < ticks.size(); ++tick_index) {
         const Tick& tick = ticks[tick_index];
         if (tick.predicted_state.size() != config_.state_dim ||
@@ -688,6 +717,7 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
                 normalize_backward(tick.working_state, tick.working_pre_state, grad_working);
             add_rejection_gradient(tick, recency_weight);
             add_affinity_retain_gradient(tick, recency_weight);
+            add_usage_repel_gradient(tick, recency_weight);
         }
     } else {
         for (std::size_t tick_index = 0; tick_index < ticks.size(); ++tick_index) {
@@ -711,6 +741,7 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
 
             add_rejection_gradient(tick, recency_weight);
             add_affinity_retain_gradient(tick, recency_weight);
+            add_usage_repel_gradient(tick, recency_weight);
         }
     }
 
