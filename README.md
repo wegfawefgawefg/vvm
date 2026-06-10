@@ -36,9 +36,9 @@ cmake --build --preset dev-sdl3
 ./build/vvm smoke
 ./build/vvm run --steps 8 --state-dim 256 --ops 1024 --candidates 8 --update-scale 1.0
 ./build/vvm run --steps 8 --state-heat 0.01 --op-heat 0.001 --heat-decay 0.999
-./build/vvm train-toy --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1
+./build/vvm train-toy --epochs 100 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
 ./build-sdl3/vvm visualize --steps 256
-./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1
+./build-sdl3/vvm visualize-train --epochs 200 --sample-frames 8 --idle-frames 8 --window 8 --lr 0.1 --rejection-scale 0.01
 ```
 
 `smoke`, `run`, and `train-toy` are headless. `visualize` and
@@ -48,6 +48,8 @@ The first toy task is `copy-input`: a nonnegative input vector is shown for
 `--sample-frames` ticks and the model trains state toward that same vector.
 When `--idle-frames` is nonzero, the model keeps ticking with no input between
 samples and trains on its own observed next state as a self-prediction signal.
+`--rejection-scale` adds a weak local repulsion from high-loss query/op matches,
+so failed ops stop monopolizing the same region of state space.
 
 ## Layout
 

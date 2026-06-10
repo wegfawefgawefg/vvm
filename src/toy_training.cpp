@@ -114,6 +114,8 @@ LossPoint train_toy_epoch(Model& model, std::span<const ToySample> train_samples
     train_config.learning_rate = task_config.learning_rate;
     train_config.recency_decay = task_config.recency_decay;
     train_config.max_grad_norm = task_config.max_grad_norm;
+    train_config.rejection_scale = task_config.rejection_scale;
+    train_config.rejection_threshold = task_config.rejection_threshold;
 
     std::mt19937 rng(task_config.seed ^ static_cast<std::uint32_t>(epoch * 0x9E3779B9U));
     std::vector<std::size_t> order(train_samples.size());

@@ -162,6 +162,41 @@ void test_train_window_updates_only_chosen_ops() {
     assert(changed_ops == 1U);
 }
 
+void test_rejection_lowers_bad_op_affinity() {
+    vvm::Config config{};
+    config.state_dim = 8;
+    config.num_ops = 16;
+    config.candidate_count = 4;
+    config.update_scale = 1.0F;
+
+    vvm::Model model(config);
+    std::vector<float> state = model.seeded_state();
+    std::mt19937 rng(config.seed);
+    vvm::Tick tick = model.tick(state, rng, 0);
+
+    tick.observed_state = tick.predicted_state;
+    tick.prediction_error = 1.0F;
+
+    const std::span<const float> before = model.op_bank();
+    const std::span<const float> before_op =
+        before.subspan(tick.chosen_op * config.state_dim, config.state_dim);
+    const float before_affinity = vvm::dot_product(before_op, tick.working_state);
+
+    vvm::TrainConfig train_config{};
+    train_config.learning_rate = 0.5F;
+    train_config.max_grad_norm = 10.0F;
+    train_config.rejection_scale = 1.0F;
+    train_config.rejection_threshold = 0.0F;
+    (void)model.train_window(std::span<const vvm::Tick>(&tick, 1), train_config);
+
+    const std::span<const float> after = model.op_bank();
+    const std::span<const float> after_op =
+        after.subspan(tick.chosen_op * config.state_dim, config.state_dim);
+    const float after_affinity = vvm::dot_product(after_op, tick.working_state);
+
+    assert(after_affinity < before_affinity);
+}
+
 void test_toy_training_runs() {
     vvm::Config config{};
     config.state_dim = 8;
@@ -214,6 +249,7 @@ int main() {
     test_heat_creates_curiosity();
     test_tick_masks_missing_external_reward();
     test_train_window_updates_only_chosen_ops();
+    test_rejection_lowers_bad_op_affinity();
     test_toy_training_runs();
     test_invalid_config();
 

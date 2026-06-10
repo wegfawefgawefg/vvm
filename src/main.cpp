@@ -132,6 +132,14 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::ToyTaskConfi
             if (!parse_float(value, task_config.max_grad_norm)) {
                 return false;
             }
+        } else if (arg == "--rejection-scale") {
+            if (!parse_float(value, task_config.rejection_scale)) {
+                return false;
+            }
+        } else if (arg == "--rejection-threshold") {
+            if (!parse_float(value, task_config.rejection_threshold)) {
+                return false;
+            }
         } else {
             std::cerr << "unknown option: " << arg << '\n';
             return false;
@@ -175,6 +183,8 @@ int run_toy_training(const vvm::Config& config, const vvm::ToyTaskConfig& task_c
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
               << " window=" << task_config.window_size << " lr=" << task_config.learning_rate
+              << " rejection_scale=" << task_config.rejection_scale
+              << " rejection_threshold=" << task_config.rejection_threshold
               << " params=" << model.parameter_count() << '\n';
 
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {

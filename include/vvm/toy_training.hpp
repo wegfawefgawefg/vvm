@@ -28,6 +28,8 @@ struct ToyTaskConfig {
     float learning_rate = 0.05F;
     float recency_decay = 0.97F;
     float max_grad_norm = 1.0F;
+    float rejection_scale = 0.0F;
+    float rejection_threshold = 0.02F;
     std::uint32_t seed = 0x51A7E5U;
 };
 

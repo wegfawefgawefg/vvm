@@ -353,6 +353,12 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     if (train_config.max_grad_norm < 0.0F) {
         throw std::invalid_argument("max_grad_norm must be nonnegative");
     }
+    if (train_config.rejection_scale < 0.0F) {
+        throw std::invalid_argument("rejection_scale must be nonnegative");
+    }
+    if (train_config.rejection_threshold < 0.0F) {
+        throw std::invalid_argument("rejection_threshold must be nonnegative");
+    }
     if (ticks.empty()) {
         return TrainResult{};
     }
@@ -371,6 +377,9 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
             tick.pre_relu.size() != config_.state_dim ||
             tick.post_relu.size() != config_.state_dim || tick.chosen_op >= config_.num_ops) {
             throw std::invalid_argument("tick is incompatible with model config");
+        }
+        if (!tick.working_state.empty() && tick.working_state.size() != config_.state_dim) {
+            throw std::invalid_argument("tick working_state is incompatible with model config");
         }
 
         const std::size_t age = ticks.size() - 1U - tick_index;
@@ -393,6 +402,16 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         for (std::size_t i = 0; i < config_.state_dim; ++i) {
             if (tick.pre_relu[i] > 0.0F) {
                 gradients[op_offset + i] += config_.update_scale * grad_post[i];
+            }
+        }
+
+        const float rejection_excess = tick.prediction_error - train_config.rejection_threshold;
+        if (train_config.rejection_scale > 0.0F && rejection_excess > 0.0F &&
+            !tick.working_state.empty()) {
+            const float rejection =
+                recency_weight * train_config.rejection_scale * rejection_excess;
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                gradients[op_offset + i] += rejection * tick.working_state[i];
             }
         }
         ++op_counts[tick.chosen_op];

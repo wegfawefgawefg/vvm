@@ -137,13 +137,15 @@ void draw_loss_graph(SDL_Renderer* renderer, const Model& model, const ToyTaskCo
                   "vvm toy training  epoch=%zu/%zu  params=%zu  %.2f MiB\n"
                   "train_loss=%.6f  self_loss=%.6f  test_loss=%.6f  max_loss=%.6f\n"
                   "samples train=%zu test=%zu  sample_frames=%zu  idle_frames=%zu  window=%zu  "
-                  "lr=%.4f",
+                  "lr=%.4f  reject=%.4f@%.4f",
                   history.size(), target_epochs, model.parameter_count(), mib,
                   static_cast<double>(latest.train_loss), static_cast<double>(latest.self_loss),
                   static_cast<double>(latest.test_loss), static_cast<double>(max_loss),
                   task_config.train_samples, task_config.test_samples,
                   task_config.frames_per_sample, task_config.idle_frames_between_samples,
-                  task_config.window_size, static_cast<double>(task_config.learning_rate));
+                  task_config.window_size, static_cast<double>(task_config.learning_rate),
+                  static_cast<double>(task_config.rejection_scale),
+                  static_cast<double>(task_config.rejection_threshold));
 
     draw_text(renderer, 20, overlay, 14.0F, 14.0F, SDL_Color{235, 240, 245, 255});
     draw_text(renderer, 16, "train", right - 140.0F, top + 12.0F, SDL_Color{90, 210, 245, 255});
