@@ -31,6 +31,7 @@ enum class ReadoutSource {
 
 struct CliOptions {
     std::size_t epochs = 200;
+    std::size_t hidden_dim = 64;
     float readout_learning_rate = 0.1F;
     ReadoutSource readout_source = ReadoutSource::Input;
     bool restore_best = false;
@@ -60,6 +61,8 @@ void print_usage() {
                  "[--op-anchor-scale F] [--anchor-to-best] [--bptt] [--restore-best]\n"
               << "  vvm train-readout [--task mnist] [--readout-source input|vvm] "
                  "[--readout-lr F] [--epochs N] [--train-samples N] [--test-samples N]\n"
+              << "  vvm train-mlp [--task mnist-01|mnist] [--hidden N] [--readout-lr F] "
+                 "[--epochs N] [--train-samples N] [--test-samples N]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
@@ -298,6 +301,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--epochs") {
             if (!parse_size(value, cli_options.epochs)) {
+                return false;
+            }
+        } else if (arg == "--hidden" || arg == "--hidden-dim") {
+            if (!parse_size(value, cli_options.hidden_dim)) {
                 return false;
             }
         } else if (arg == "--readout-lr") {
@@ -627,6 +634,25 @@ vvm::ReadoutMetrics evaluate_readout(vvm::Model& model, const vvm::LinearReadout
     return metrics;
 }
 
+vvm::ReadoutMetrics evaluate_mlp_readout(const vvm::MlpReadout& readout,
+                                         std::span<const vvm::TaskSample> samples) {
+    vvm::ReadoutMetrics metrics{};
+    for (const vvm::TaskSample& sample : samples) {
+        if (sample.label < 0) {
+            continue;
+        }
+        metrics.loss += readout.loss_one(sample.input, sample.label);
+        metrics.accuracy += readout.predict(sample.input) == sample.label ? 1.0F : 0.0F;
+        ++metrics.samples;
+    }
+
+    if (metrics.samples > 0U) {
+        metrics.loss /= static_cast<float>(metrics.samples);
+        metrics.accuracy /= static_cast<float>(metrics.samples);
+    }
+    return metrics;
+}
+
 float span_delta_l2(std::span<const float> before, std::span<const float> after) {
     if (before.size() != after.size()) {
         throw std::invalid_argument("span_delta_l2 requires equal sizes");
@@ -868,6 +894,62 @@ int run_readout_training(const vvm::Config& config, const vvm::TaskConfig& task_
     return 0;
 }
 
+int run_mlp_training(const vvm::Config& config, const vvm::TaskConfig& task_config,
+                     const CliOptions& cli_options) {
+    const vvm::TaskDataset dataset = vvm::make_task_dataset(config, task_config);
+    const std::size_t class_count = infer_class_count(dataset.train);
+
+    vvm::MlpReadout readout(vvm::ReadoutConfig{
+        .input_dim = config.state_dim,
+        .hidden_dim = cli_options.hidden_dim,
+        .class_count = class_count,
+        .learning_rate = cli_options.readout_learning_rate,
+    });
+
+    std::cout << "mlp task=" << vvm::task_name(task_config.task) << " epochs=" << cli_options.epochs
+              << " train_samples=" << dataset.train.size()
+              << " test_samples=" << dataset.test.size() << " input_dim=" << config.state_dim
+              << " hidden=" << cli_options.hidden_dim << " classes=" << class_count
+              << " lr=" << cli_options.readout_learning_rate
+              << " params=" << readout.parameter_count() << '\n';
+
+    std::vector<std::size_t> order(dataset.train.size());
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        order[i] = i;
+    }
+
+    for (std::size_t epoch = 0; epoch < cli_options.epochs; ++epoch) {
+        std::mt19937 shuffle_rng(task_config.seed ^ static_cast<std::uint32_t>(epoch));
+        std::shuffle(order.begin(), order.end(), shuffle_rng);
+
+        float train_loss = 0.0F;
+        float train_accuracy = 0.0F;
+        std::size_t trained = 0;
+        for (const std::size_t sample_index : order) {
+            const vvm::TaskSample& sample = dataset.train[sample_index];
+            if (sample.label < 0) {
+                continue;
+            }
+            train_loss += readout.train_one(sample.input, sample.label);
+            train_accuracy += readout.predict(sample.input) == sample.label ? 1.0F : 0.0F;
+            ++trained;
+        }
+
+        if (trained > 0U) {
+            train_loss /= static_cast<float>(trained);
+            train_accuracy /= static_cast<float>(trained);
+        }
+
+        const vvm::ReadoutMetrics test = evaluate_mlp_readout(readout, dataset.test);
+        std::cout << "epoch " << std::setw(4) << epoch << " train_loss=" << train_loss
+                  << " train_accuracy=" << (100.0F * train_accuracy) << "%"
+                  << " test_loss=" << test.loss << " test_accuracy=" << (100.0F * test.accuracy)
+                  << "%" << " samples=" << test.samples << '\n';
+    }
+
+    return 0;
+}
+
 int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, std::size_t epochs) {
     struct BenchTask {
         vvm::TaskKind task = vvm::TaskKind::CopyInput;
@@ -966,6 +1048,10 @@ int main(int argc, char** argv) {
 
         if (command == "train-readout") {
             return run_readout_training(config, task_config, cli_options);
+        }
+
+        if (command == "train-mlp") {
+            return run_mlp_training(config, task_config, cli_options);
         }
 
         if (command == "bench-tasks") {
