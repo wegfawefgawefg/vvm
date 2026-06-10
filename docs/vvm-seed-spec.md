@@ -5,7 +5,7 @@ The initial machine is:
 ```text
 candidates = top_n(dot(S(t), OpBank))
 op = sample_one(candidates)
-S(t + 1) = normalize(ReLU(S(t) + update_scale * op))
+S(t + 1) = normalize(activation(S(t) + update_scale * op))
 ```
 
 ## V0 Constraints
@@ -13,7 +13,7 @@ S(t + 1) = normalize(ReLU(S(t) + update_scale * op))
 - One state vector.
 - One fixed-size trainable op table.
 - State queries nearest ops directly.
-- Retrieved ops update state through a fused multiply-add and ReLU.
+- Retrieved ops update state through a fused multiply-add, activation, and normalization.
 - Classification/readout happens from the final state later.
 - No separate program counter.
 - No separate key/value memory.

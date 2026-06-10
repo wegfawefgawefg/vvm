@@ -9,6 +9,11 @@
 
 namespace vvm {
 
+enum class VectorRange {
+    Signed,
+    Nonnegative,
+};
+
 enum class TaskKind {
     CopyInput,
     DelayedCopy,
@@ -39,6 +44,7 @@ struct TaskConfig {
     float max_grad_norm = 1.0F;
     float rejection_scale = 0.0F;
     float rejection_threshold = 0.02F;
+    VectorRange vector_range = VectorRange::Signed;
     std::uint32_t seed = 0x51A7E5U;
 };
 

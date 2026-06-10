@@ -27,7 +27,7 @@ heat(op_bank)
 scores = dot(working_state, op_i)
 candidates = top_n(scores)
 op = sample_one(candidates)
-predicted = normalize(ReLU(working_state + update_scale * op))
+predicted = normalize(activation(working_state + update_scale * op))
 
 observed = normalize(predicted + heat(state))
 

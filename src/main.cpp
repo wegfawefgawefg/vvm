@@ -24,10 +24,12 @@ void print_usage() {
     std::cout << "usage:\n"
               << "  vvm smoke\n"
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
-                 "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
+                 "[--activation relu|leaky-relu|clamp|deadzone] [--update-scale F] "
+                 "[--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--task copy-input|delayed-copy|alternating-bit|xor|sine-next] "
-                 "[--sample-frames N] [--idle-frames N] [--window N] [--lr F]\n"
+                 "[--vectors signed|nonnegative] [--sample-frames N] [--idle-frames N] "
+                 "[--window N] [--lr F]\n"
               << "  vvm bench-tasks [--epochs N] [--state-dim N] [--ops N] [--candidates N]\n"
               << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--candidates N] "
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
@@ -73,6 +75,62 @@ bool parse_task(std::string_view value, vvm::TaskKind& out) {
     return false;
 }
 
+bool parse_activation(std::string_view value, vvm::ActivationKind& out) {
+    if (value == "relu") {
+        out = vvm::ActivationKind::Relu;
+        return true;
+    }
+    if (value == "leaky-relu" || value == "leaky") {
+        out = vvm::ActivationKind::LeakyRelu;
+        return true;
+    }
+    if (value == "clamp") {
+        out = vvm::ActivationKind::Clamp;
+        return true;
+    }
+    if (value == "deadzone" || value == "hardshrink" || value == "signed-threshold") {
+        out = vvm::ActivationKind::Deadzone;
+        return true;
+    }
+    return false;
+}
+
+bool parse_vector_range(std::string_view value, vvm::VectorRange& out) {
+    if (value == "signed") {
+        out = vvm::VectorRange::Signed;
+        return true;
+    }
+    if (value == "nonnegative" || value == "positive") {
+        out = vvm::VectorRange::Nonnegative;
+        return true;
+    }
+    return false;
+}
+
+const char* activation_name(vvm::ActivationKind activation) {
+    switch (activation) {
+    case vvm::ActivationKind::Relu:
+        return "relu";
+    case vvm::ActivationKind::LeakyRelu:
+        return "leaky-relu";
+    case vvm::ActivationKind::Clamp:
+        return "clamp";
+    case vvm::ActivationKind::Deadzone:
+        return "deadzone";
+    }
+    return "unknown";
+}
+
+const char* vector_range_name(vvm::VectorRange range) {
+    switch (range) {
+    case vvm::VectorRange::Signed:
+        return "signed";
+    case vvm::VectorRange::Nonnegative:
+        return "nonnegative";
+    }
+    return "unknown";
+}
+
 bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& task_config,
                    std::size_t& epochs) {
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -85,6 +143,14 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
         const std::string_view value(args[i + 1]);
         if (arg == "--task") {
             if (!parse_task(value, task_config.task)) {
+                return false;
+            }
+        } else if (arg == "--activation") {
+            if (!parse_activation(value, config.activation)) {
+                return false;
+            }
+        } else if (arg == "--vectors" || arg == "--vector-range") {
+            if (!parse_vector_range(value, task_config.vector_range)) {
                 return false;
             }
         } else if (arg == "--steps") {
@@ -109,6 +175,14 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--input-scale") {
             if (!parse_float(value, config.input_scale)) {
+                return false;
+            }
+        } else if (arg == "--activation-threshold") {
+            if (!parse_float(value, config.activation_threshold)) {
+                return false;
+            }
+        } else if (arg == "--activation-leak") {
+            if (!parse_float(value, config.activation_leak)) {
                 return false;
             }
         } else if (arg == "--state-heat") {
@@ -187,6 +261,7 @@ int run_headless(const vvm::Config& config) {
 
     std::cout << "steps=" << config.steps << " state_dim=" << config.state_dim
               << " ops=" << config.num_ops << " candidates=" << config.candidate_count
+              << " activation=" << activation_name(config.activation)
               << " params=" << model.parameter_count() << " param_bytes=" << model.parameter_bytes()
               << '\n';
 
@@ -211,6 +286,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
     std::cout << "task=" << vvm::task_name(task_config.task) << " epochs=" << epochs
               << " train_samples=" << dataset.train.size()
               << " test_samples=" << dataset.test.size()
+              << " activation=" << activation_name(config.activation)
+              << " vectors=" << vector_range_name(task_config.vector_range)
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
               << " window=" << task_config.window_size << " lr=" << task_config.learning_rate
@@ -243,6 +320,8 @@ int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, st
 
     std::cout << "task_bench" << " epochs=" << epochs << " state_dim=" << config.state_dim
               << " ops=" << config.num_ops << " candidates=" << config.candidate_count
+              << " activation=" << activation_name(config.activation)
+              << " vectors=" << vector_range_name(base_task_config.vector_range)
               << " train_samples=" << base_task_config.train_samples
               << " test_samples=" << base_task_config.test_samples
               << " sample_frames=" << base_task_config.frames_per_sample

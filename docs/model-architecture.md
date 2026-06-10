@@ -73,7 +73,7 @@ candidates = top candidate_count scores
 chosen = sample_one(candidates)
 
 z = working + update_scale * op_chosen
-a = ReLU(z)
+a = activation(z)
 predicted = normalize(a)
 
 observed = normalize(predicted + state_heat)
@@ -314,7 +314,8 @@ struct Tick {
     std::size_t chosen_op;
     float chosen_prob;
 
-    std::vector<float> pre_relu;
+    std::vector<float> pre_activation;
+    std::vector<float> post_activation;
     std::vector<float> predicted_state;
     std::vector<float> observed_state;
 
@@ -385,8 +386,8 @@ Forward cache for one tick:
 ```text
 working
 chosen_op
-pre_relu z
-post_relu a
+pre_activation z
+post_activation a
 predicted = normalize(a)
 target = observed_next
 ```
@@ -406,8 +407,9 @@ normalize backward:
     y = x / ||x||
     dL/dx = (g - y * dot(g, y)) / ||x||
 
-ReLU backward:
-    dL/dz_i = dL/da_i if z_i > 0 else 0
+activation backward:
+    relu:     dL/dz_i = dL/da_i if z_i > 0 else 0
+    deadzone: dL/dz_i = dL/da_i if abs(z_i) > threshold else 0
 
 z = working + update_scale * op_chosen:
     dL/dop_chosen += update_scale * dL/dz
@@ -591,3 +593,33 @@ bootstrapped value target over the candidate choices available to VVM.
 6. Add external reward stream.
 7. Add value readout and truncated returns.
 8. Add candidate-policy learning only after the model can predict.
+
+## Activation Modes
+
+VVM now supports four cheap activation modes:
+
+```text
+relu
+leaky-relu
+clamp
+deadzone
+```
+
+The default is `deadzone`:
+
+```text
+y = sign(x) * max(abs(x) - threshold, 0)
+```
+
+This is a signed hard threshold. Small values near zero are suppressed, strong
+positive and negative values survive, and the derivative is either `0` in the
+dead band or `1` outside it. This keeps the implementation simple for manual
+training while avoiding the main issue with plain ReLU in a recurrent VM:
+negative state cannot persist through ticks.
+
+Modern feedforward nets get a lot of mileage from ReLU because it is cheap,
+stable, and avoids sigmoid/tanh saturation. They can still represent signed
+effects through negative weights between layers. VVM is different because its
+state persists as memory. If every tick clips state to nonnegative values, the
+machine loses signed memory unless we add opponent channels or another explicit
+signed representation.

@@ -86,6 +86,40 @@ std::size_t sample_weighted(std::span<const float> weights, std::mt19937& rng) {
     return weights.size() - 1U;
 }
 
+float activate(float value, const Config& config) {
+    switch (config.activation) {
+    case ActivationKind::Relu:
+        return std::max(0.0F, value);
+    case ActivationKind::LeakyRelu:
+        return value >= 0.0F ? value : config.activation_leak * value;
+    case ActivationKind::Clamp:
+        return std::clamp(value, -1.0F, 1.0F);
+    case ActivationKind::Deadzone:
+        if (value > config.activation_threshold) {
+            return value - config.activation_threshold;
+        }
+        if (value < -config.activation_threshold) {
+            return value + config.activation_threshold;
+        }
+        return 0.0F;
+    }
+    return value;
+}
+
+float activation_derivative(float value, const Config& config) {
+    switch (config.activation) {
+    case ActivationKind::Relu:
+        return value > 0.0F ? 1.0F : 0.0F;
+    case ActivationKind::LeakyRelu:
+        return value >= 0.0F ? 1.0F : config.activation_leak;
+    case ActivationKind::Clamp:
+        return value > -1.0F && value < 1.0F ? 1.0F : 0.0F;
+    case ActivationKind::Deadzone:
+        return std::fabs(value) > config.activation_threshold ? 1.0F : 0.0F;
+    }
+    return 1.0F;
+}
+
 } // namespace
 
 float l2_norm(std::span<const float> values) {
@@ -114,6 +148,12 @@ Model::Model(Config config) : config_(config) {
     }
     if (config_.input_scale < 0.0F) {
         throw std::invalid_argument("input_scale must be nonnegative");
+    }
+    if (config_.activation_threshold < 0.0F) {
+        throw std::invalid_argument("activation_threshold must be nonnegative");
+    }
+    if (config_.activation_leak < 0.0F) {
+        throw std::invalid_argument("activation_leak must be nonnegative");
     }
     if (config_.state_heat_stddev < 0.0F) {
         throw std::invalid_argument("state_heat_stddev must be nonnegative");
@@ -248,21 +288,21 @@ Model::Prediction Model::predict_from_working_state(std::span<const float> worki
         op_bank_.data() + (retrieval.chosen_index * config_.state_dim), config_.state_dim);
 
     std::vector<float> predicted_state(working_state.begin(), working_state.end());
-    std::vector<float> pre_relu(config_.state_dim);
-    std::vector<float> post_relu(config_.state_dim);
+    std::vector<float> pre_activation(config_.state_dim);
+    std::vector<float> post_activation(config_.state_dim);
     float activation_sum = 0.0F;
     for (std::size_t i = 0; i < config_.state_dim; ++i) {
-        pre_relu[i] = predicted_state[i] + (config_.update_scale * op_vector[i]);
-        post_relu[i] = std::max(0.0F, pre_relu[i]);
-        predicted_state[i] = post_relu[i];
-        activation_sum += post_relu[i];
+        pre_activation[i] = predicted_state[i] + (config_.update_scale * op_vector[i]);
+        post_activation[i] = activate(pre_activation[i], config_);
+        predicted_state[i] = post_activation[i];
+        activation_sum += std::fabs(post_activation[i]);
     }
     normalize_l2(predicted_state);
 
     return Prediction{
         .state = std::move(predicted_state),
-        .pre_relu = std::move(pre_relu),
-        .post_relu = std::move(post_relu),
+        .pre_activation = std::move(pre_activation),
+        .post_activation = std::move(post_activation),
         .retrieval = std::move(retrieval),
         .activation_mean = activation_sum / static_cast<float>(config_.state_dim),
     };
@@ -281,21 +321,21 @@ Model::Prediction Model::predict_from_working_state(std::span<const float> worki
         op_bank_.data() + (retrieval.chosen_index * config_.state_dim), config_.state_dim);
 
     std::vector<float> predicted_state(working_state.begin(), working_state.end());
-    std::vector<float> pre_relu(config_.state_dim);
-    std::vector<float> post_relu(config_.state_dim);
+    std::vector<float> pre_activation(config_.state_dim);
+    std::vector<float> post_activation(config_.state_dim);
     float activation_sum = 0.0F;
     for (std::size_t i = 0; i < config_.state_dim; ++i) {
-        pre_relu[i] = predicted_state[i] + (config_.update_scale * op_vector[i]);
-        post_relu[i] = std::max(0.0F, pre_relu[i]);
-        predicted_state[i] = post_relu[i];
-        activation_sum += post_relu[i];
+        pre_activation[i] = predicted_state[i] + (config_.update_scale * op_vector[i]);
+        post_activation[i] = activate(pre_activation[i], config_);
+        predicted_state[i] = post_activation[i];
+        activation_sum += std::fabs(post_activation[i]);
     }
     normalize_l2(predicted_state);
 
     return Prediction{
         .state = std::move(predicted_state),
-        .pre_relu = std::move(pre_relu),
-        .post_relu = std::move(post_relu),
+        .pre_activation = std::move(pre_activation),
+        .post_activation = std::move(post_activation),
         .retrieval = std::move(retrieval),
         .activation_mean = activation_sum / static_cast<float>(config_.state_dim),
     };
@@ -342,8 +382,8 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         .chosen_prob = chosen_prob,
         .chosen_score = prediction.retrieval.chosen_score,
         .max_score = prediction.retrieval.max_score,
-        .pre_relu = std::move(prediction.pre_relu),
-        .post_relu = std::move(prediction.post_relu),
+        .pre_activation = std::move(prediction.pre_activation),
+        .post_activation = std::move(prediction.post_activation),
         .predicted_state = std::move(prediction.state),
         .observed_state = state,
         .activation_mean = prediction.activation_mean,
@@ -386,8 +426,8 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         const Tick& tick = ticks[tick_index];
         if (tick.predicted_state.size() != config_.state_dim ||
             tick.observed_state.size() != config_.state_dim ||
-            tick.pre_relu.size() != config_.state_dim ||
-            tick.post_relu.size() != config_.state_dim || tick.chosen_op >= config_.num_ops) {
+            tick.pre_activation.size() != config_.state_dim ||
+            tick.post_activation.size() != config_.state_dim || tick.chosen_op >= config_.num_ops) {
             throw std::invalid_argument("tick is incompatible with model config");
         }
         if (!tick.working_state.empty() && tick.working_state.size() != config_.state_dim) {
@@ -408,13 +448,13 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         }
 
         std::vector<float> grad_post =
-            normalize_backward(tick.predicted_state, tick.post_relu, grad_pred);
+            normalize_backward(tick.predicted_state, tick.post_activation, grad_pred);
 
         const std::size_t op_offset = tick.chosen_op * config_.state_dim;
         for (std::size_t i = 0; i < config_.state_dim; ++i) {
-            if (tick.pre_relu[i] > 0.0F) {
-                gradients[op_offset + i] += config_.update_scale * grad_post[i];
-            }
+            gradients[op_offset + i] += config_.update_scale *
+                                        activation_derivative(tick.pre_activation[i], config_) *
+                                        grad_post[i];
         }
 
         const float rejection_excess = tick.prediction_error - train_config.rejection_threshold;

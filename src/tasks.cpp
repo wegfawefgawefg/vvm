@@ -33,18 +33,48 @@ std::vector<float> random_nonnegative_unit(std::size_t size, std::mt19937& rng) 
     return values;
 }
 
+std::vector<float> random_signed_unit(std::size_t size, std::mt19937& rng) {
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> values(size);
+    for (float& value : values) {
+        value = dist(rng);
+    }
+    normalize_l2(values);
+    return values;
+}
+
 std::vector<float> basis_vector(std::size_t size, std::size_t index) {
     std::vector<float> values(size, 0.0F);
     values[index % size] = 1.0F;
     return values;
 }
 
-std::vector<float> bit_vector(std::size_t size, bool bit) {
+std::vector<float> bit_vector(std::size_t size, bool bit, VectorRange range) {
+    if (range == VectorRange::Signed && size > 1U) {
+        std::vector<float> values(size, 0.0F);
+        values[0] = bit ? -1.0F : 1.0F;
+        values[1] = bit ? 1.0F : -1.0F;
+        normalize_l2(values);
+        return values;
+    }
     return basis_vector(size, bit && size > 1U ? 1U : 0U);
 }
 
-std::vector<float> binary_pair_vector(std::size_t size, bool first, bool second) {
+std::vector<float> binary_pair_vector(std::size_t size, bool first, bool second,
+                                      VectorRange range) {
     std::vector<float> values(size, 0.0F);
+    if (range == VectorRange::Signed) {
+        values[0] = first ? 1.0F : -1.0F;
+        if (size > 1U) {
+            values[1] = second ? 1.0F : -1.0F;
+        }
+        if (size > 2U) {
+            values[2] = 1.0F;
+        }
+        normalize_l2(values);
+        return values;
+    }
+
     values[0] = first ? 1.0F : 0.0F;
     if (size > 1U) {
         values[1] = second ? 1.0F : 0.0F;
@@ -56,39 +86,46 @@ std::vector<float> binary_pair_vector(std::size_t size, bool first, bool second)
     return values;
 }
 
-std::vector<float> sine_phase_vector(std::size_t size, float phase) {
+std::vector<float> sine_phase_vector(std::size_t size, float phase, VectorRange range) {
     constexpr float kPi = 3.14159265358979323846F;
     std::vector<float> values(size, 0.0F);
-    values[0] = (std::sin(phase) + 1.0F) * 0.5F;
+    const auto encode = [range](float value) {
+        return range == VectorRange::Signed ? value : (value + 1.0F) * 0.5F;
+    };
+    values[0] = encode(std::sin(phase));
     if (size > 1U) {
-        values[1] = (std::cos(phase) + 1.0F) * 0.5F;
+        values[1] = encode(std::cos(phase));
     }
     if (size > 2U) {
-        values[2] = (std::sin(2.0F * phase) + 1.0F) * 0.5F;
+        values[2] = encode(std::sin(2.0F * phase));
     }
     if (size > 3U) {
-        values[3] = (std::cos(2.0F * phase) + 1.0F) * 0.5F;
+        values[3] = encode(std::cos(2.0F * phase));
     }
     if (size > 4U) {
-        values[4] = (std::sin(phase + kPi * 0.25F) + 1.0F) * 0.5F;
+        values[4] = encode(std::sin(phase + kPi * 0.25F));
     }
     normalize_l2(values);
     return values;
 }
 
 TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t index,
-                       std::size_t offset, std::mt19937& rng) {
+                       std::size_t offset, VectorRange range, std::mt19937& rng) {
     const std::size_t state_dim = model_config.state_dim;
     switch (task) {
     case TaskKind::CopyInput: {
-        std::vector<float> input = random_nonnegative_unit(state_dim, rng);
+        std::vector<float> input = range == VectorRange::Signed
+                                       ? random_signed_unit(state_dim, rng)
+                                       : random_nonnegative_unit(state_dim, rng);
         return TaskSample{
             .input = input,
             .target = std::move(input),
         };
     }
     case TaskKind::DelayedCopy: {
-        std::vector<float> input = random_nonnegative_unit(state_dim, rng);
+        std::vector<float> input = range == VectorRange::Signed
+                                       ? random_signed_unit(state_dim, rng)
+                                       : random_nonnegative_unit(state_dim, rng);
         return TaskSample{
             .input = input,
             .target = std::move(input),
@@ -97,8 +134,8 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
     case TaskKind::AlternatingBit: {
         const bool bit = ((index + offset) % 2U) != 0U;
         return TaskSample{
-            .input = bit_vector(state_dim, bit),
-            .target = bit_vector(state_dim, !bit),
+            .input = bit_vector(state_dim, bit, range),
+            .target = bit_vector(state_dim, !bit, range),
         };
     }
     case TaskKind::Xor: {
@@ -106,8 +143,8 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
         const bool first = (pattern & 0x1U) != 0U;
         const bool second = (pattern & 0x2U) != 0U;
         return TaskSample{
-            .input = binary_pair_vector(state_dim, first, second),
-            .target = bit_vector(state_dim, first != second),
+            .input = binary_pair_vector(state_dim, first, second, range),
+            .target = bit_vector(state_dim, first != second, range),
         };
     }
     case TaskKind::SineNext: {
@@ -118,8 +155,8 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
             (static_cast<float>((index + offset) % kPeriod) / static_cast<float>(kPeriod));
         const float next_phase = phase + (2.0F * kPi / static_cast<float>(kPeriod));
         return TaskSample{
-            .input = sine_phase_vector(state_dim, phase),
-            .target = sine_phase_vector(state_dim, next_phase),
+            .input = sine_phase_vector(state_dim, phase, range),
+            .target = sine_phase_vector(state_dim, next_phase, range),
         };
     }
     }
@@ -176,7 +213,8 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     auto append_samples = [&](std::vector<TaskSample>& samples, std::size_t count,
                               std::size_t offset) {
         for (std::size_t i = 0; i < count; ++i) {
-            samples.push_back(make_sample(task_config.task, model_config, i, offset, rng));
+            samples.push_back(make_sample(task_config.task, model_config, i, offset,
+                                          task_config.vector_range, rng));
         }
     };
 

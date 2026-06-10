@@ -8,13 +8,23 @@
 
 namespace vvm {
 
+enum class ActivationKind {
+    Relu,
+    LeakyRelu,
+    Clamp,
+    Deadzone,
+};
+
 struct Config {
     std::size_t state_dim = 256;
     std::size_t num_ops = 1024;
     std::size_t candidate_count = 8;
     std::size_t steps = 8;
+    ActivationKind activation = ActivationKind::Deadzone;
     float update_scale = 1.0F;
     float input_scale = 1.0F;
+    float activation_threshold = 0.05F;
+    float activation_leak = 0.01F;
     float state_heat_stddev = 0.0F;
     float op_heat_stddev = 0.0F;
     float heat_decay = 1.0F;
@@ -47,8 +57,8 @@ struct Tick {
     float chosen_score = 0.0F;
     float max_score = 0.0F;
 
-    std::vector<float> pre_relu;
-    std::vector<float> post_relu;
+    std::vector<float> pre_activation;
+    std::vector<float> post_activation;
     std::vector<float> predicted_state;
     std::vector<float> observed_state;
 
@@ -125,8 +135,8 @@ class Model {
   private:
     struct Prediction {
         std::vector<float> state;
-        std::vector<float> pre_relu;
-        std::vector<float> post_relu;
+        std::vector<float> pre_activation;
+        std::vector<float> post_activation;
         Retrieval retrieval;
         float activation_mean = 0.0F;
     };

@@ -57,6 +57,32 @@ void test_prediction_error() {
     assert(std::fabs(vvm::Model::prediction_error(predicted, observed) - 1.0F) < 1.0e-6F);
 }
 
+void test_activation_modes_tick() {
+    const vvm::ActivationKind activations[] = {
+        vvm::ActivationKind::Relu,
+        vvm::ActivationKind::LeakyRelu,
+        vvm::ActivationKind::Clamp,
+        vvm::ActivationKind::Deadzone,
+    };
+
+    for (const vvm::ActivationKind activation : activations) {
+        vvm::Config config{};
+        config.state_dim = 8;
+        config.num_ops = 16;
+        config.candidate_count = 4;
+        config.activation = activation;
+
+        vvm::Model model(config);
+        std::vector<float> state = model.seeded_state();
+        std::mt19937 rng(config.seed);
+        const vvm::Tick tick = model.tick(state, rng, 0);
+
+        assert(tick.pre_activation.size() == config.state_dim);
+        assert(tick.post_activation.size() == config.state_dim);
+        assert(std::fabs(vvm::l2_norm(tick.predicted_state) - 1.0F) < 1.0e-5F);
+    }
+}
+
 void test_heat_creates_curiosity() {
     vvm::Config config{};
     config.state_dim = 16;
@@ -117,8 +143,8 @@ void test_train_window_updates_only_chosen_ops() {
     vvm::Tick tick = model.tick(state, rng, 0);
 
     std::size_t active_index = 0;
-    for (std::size_t i = 0; i < tick.post_relu.size(); ++i) {
-        if (tick.post_relu[i] > 0.0F) {
+    for (std::size_t i = 0; i < tick.post_activation.size(); ++i) {
+        if (std::fabs(tick.post_activation[i]) > 0.0F) {
             active_index = i;
             break;
         }
@@ -282,6 +308,7 @@ int main() {
     test_dot_product();
     test_run_shape();
     test_prediction_error();
+    test_activation_modes_tick();
     test_heat_creates_curiosity();
     test_tick_masks_missing_external_reward();
     test_train_window_updates_only_chosen_ops();
