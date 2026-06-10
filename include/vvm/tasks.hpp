@@ -66,6 +66,7 @@ struct TaskConfig {
 struct EvalMetrics {
     float loss = 0.0F;
     float accuracy = 0.0F;
+    float balanced_accuracy = 0.0F;
     float mean_class_margin = 0.0F;
     std::size_t accuracy_samples = 0;
     std::vector<std::size_t> label_counts;
@@ -77,6 +78,7 @@ struct LossPoint {
     float self_loss = 0.0F;
     float test_loss = 0.0F;
     float test_accuracy = 0.0F;
+    float test_balanced_accuracy = 0.0F;
     float mean_class_margin = 0.0F;
     float state_heat_l2 = 0.0F;
     float op_heat_l2 = 0.0F;

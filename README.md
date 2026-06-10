@@ -84,14 +84,14 @@ mixed target: reconstruct the image region and set 10 digit registers in
 Task evaluation uses deterministic nearest-op retrieval so reported test metrics
 are stable; training may still sample among top candidates unless
 `--hard-retrieval` is passed.
-`mnist-01` uses the same image region with a two-class register for digits 0 and
-1. `train-task` also reports heat L2, summed learning update L2, actual op-bank
+`mnist-01` uses the same image region with a balanced two-class split for
+digits 0 and 1. `train-task` also reports heat L2, summed learning update L2, actual op-bank
 delta L2 for the epoch, total drift from initialization, selected op count, max
 op reuse, normalized op-selection entropy, and per-op pressure. Pressure is
 tracked as selection count, heat delta L2 sum, and training delta L2 sum for
 each op; the CLI prints the highest single op plus top-three `top_select`,
 `top_train`, and `top_heat` summaries each epoch. For class tasks it also prints
-label and prediction counts. `--hard-retrieval` uses the nearest op
+label and prediction counts plus `balanced_accuracy`. `--hard-retrieval` uses the nearest op
 deterministically instead of sampling among top candidates. `--class-value-scale`,
 `--class-loss-weight`, and `--rejection-decay` are tuning knobs for register
 targets and anti-collapse pressure. `--rejection-overuse-scale` makes rejection

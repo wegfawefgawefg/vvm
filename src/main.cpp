@@ -603,6 +603,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
 
     float best_accuracy = -1.0F;
     std::size_t best_accuracy_epoch = 0;
+    float best_balanced_accuracy = -1.0F;
+    std::size_t best_balanced_accuracy_epoch = 0;
     for (std::size_t epoch = 0; epoch < epochs; ++epoch) {
         const std::vector<float> epoch_bank_before(model.op_bank().begin(), model.op_bank().end());
         const vvm::LossPoint loss =
@@ -620,9 +622,16 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
                 best_accuracy = loss.test_accuracy;
                 best_accuracy_epoch = epoch;
             }
+            if (loss.test_balanced_accuracy > best_balanced_accuracy) {
+                best_balanced_accuracy = loss.test_balanced_accuracy;
+                best_balanced_accuracy_epoch = epoch;
+            }
             std::cout << " test_accuracy=" << (100.0F * loss.test_accuracy) << "%";
             std::cout << " best_accuracy=" << (100.0F * best_accuracy) << "%"
                       << "@" << best_accuracy_epoch;
+            std::cout << " balanced_accuracy=" << (100.0F * loss.test_balanced_accuracy) << "%"
+                      << " best_balanced=" << (100.0F * best_balanced_accuracy) << "%"
+                      << "@" << best_balanced_accuracy_epoch;
             std::cout << " class_margin=" << loss.mean_class_margin;
             print_counts("labels", loss.label_counts);
             print_counts("preds", loss.prediction_counts);

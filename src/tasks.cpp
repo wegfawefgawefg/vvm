@@ -315,8 +315,16 @@ void append_mnist_binary_split(std::vector<TaskSample>& samples,
                                  images_path.parent_path().string());
     }
 
+    const std::array<std::size_t, 2> target_counts = {
+        requested_count / 2U,
+        requested_count - (requested_count / 2U),
+    };
+    std::array<std::size_t, 2> seen_counts = {};
     std::array<unsigned char, 784> pixels = {};
-    for (std::size_t i = 0; i < image_count && samples.size() < requested_count; ++i) {
+    for (std::size_t i = 0; i < image_count &&
+                            (seen_counts[0] < target_counts[0] ||
+                             seen_counts[1] < target_counts[1]);
+         ++i) {
         unsigned char label = 0;
         images.read(reinterpret_cast<char*>(pixels.data()),
                     static_cast<std::streamsize>(pixels.size()));
@@ -325,9 +333,16 @@ void append_mnist_binary_split(std::vector<TaskSample>& samples,
             throw std::runtime_error("truncated MNIST IDX files in " +
                                      images_path.parent_path().string());
         }
-        if (label <= 1U) {
+        if (label <= 1U &&
+            seen_counts[static_cast<std::size_t>(label)] <
+                target_counts[static_cast<std::size_t>(label)]) {
             samples.push_back(make_mnist_binary_sample(pixels, label, state_dim, task_config));
+            ++seen_counts[static_cast<std::size_t>(label)];
         }
+    }
+    if (seen_counts[0] != target_counts[0] || seen_counts[1] != target_counts[1]) {
+        throw std::runtime_error("not enough MNIST 0/1 samples in " +
+                                 images_path.parent_path().string());
     }
 }
 
@@ -734,6 +749,7 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
     }
     std::vector<std::size_t> label_counts(static_cast<std::size_t>(max_class_count), 0U);
     std::vector<std::size_t> prediction_counts(static_cast<std::size_t>(max_class_count), 0U);
+    std::vector<std::size_t> correct_counts(static_cast<std::size_t>(max_class_count), 0U);
     for (std::size_t i = 0; i < samples.size(); ++i) {
         validate_sample(samples[i], model.config().state_dim);
         std::vector<float> state = neutral_state(model.config().state_dim);
@@ -767,9 +783,13 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
                                          task_config.vector_range, candidate));
             }
             class_margin_sum += label_score - best_other_score;
-            correct += predicted == samples[i].label ? 1U : 0U;
+            const bool is_correct = predicted == samples[i].label;
+            correct += is_correct ? 1U : 0U;
             if (static_cast<std::size_t>(samples[i].label) < label_counts.size()) {
                 ++label_counts[static_cast<std::size_t>(samples[i].label)];
+                if (is_correct) {
+                    ++correct_counts[static_cast<std::size_t>(samples[i].label)];
+                }
             }
             if (predicted >= 0 && static_cast<std::size_t>(predicted) < prediction_counts.size()) {
                 ++prediction_counts[static_cast<std::size_t>(predicted)];
@@ -777,11 +797,26 @@ EvalMetrics evaluate_task_metrics(Model& model, std::span<const TaskSample> samp
             ++accuracy_samples;
         }
     }
+    float balanced_accuracy = 0.0F;
+    std::size_t balanced_classes = 0;
+    for (std::size_t label = 0; label < label_counts.size(); ++label) {
+        if (label_counts[label] == 0U) {
+            continue;
+        }
+        balanced_accuracy +=
+            static_cast<float>(correct_counts[label]) / static_cast<float>(label_counts[label]);
+        ++balanced_classes;
+    }
+    if (balanced_classes > 0U) {
+        balanced_accuracy /= static_cast<float>(balanced_classes);
+    }
+
     return EvalMetrics{
         .loss = loss_sum / static_cast<float>(samples.size()),
         .accuracy = accuracy_samples == 0U
                         ? 0.0F
                         : static_cast<float>(correct) / static_cast<float>(accuracy_samples),
+        .balanced_accuracy = balanced_accuracy,
         .mean_class_margin =
             accuracy_samples == 0U ? 0.0F : class_margin_sum / static_cast<float>(accuracy_samples),
         .accuracy_samples = accuracy_samples,
@@ -803,6 +838,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         LossPoint loss{};
         loss.test_loss = metrics.loss;
         loss.test_accuracy = metrics.accuracy;
+        loss.test_balanced_accuracy = metrics.balanced_accuracy;
         loss.accuracy_samples = metrics.accuracy_samples;
         loss.op_selection_counts.assign(model.config().num_ops, 0U);
         return loss;
@@ -902,6 +938,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         self_ticks == 0U ? 0.0F : self_loss_sum / static_cast<float>(self_ticks);
     diagnostics.test_loss = metrics.loss;
     diagnostics.test_accuracy = metrics.accuracy;
+    diagnostics.test_balanced_accuracy = metrics.balanced_accuracy;
     diagnostics.mean_class_margin = metrics.mean_class_margin;
     diagnostics.accuracy_samples = metrics.accuracy_samples;
     diagnostics.label_counts = metrics.label_counts;

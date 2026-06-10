@@ -175,6 +175,11 @@ sampled top-k retrieval. This makes reported `test_loss`, `test_accuracy`, and
 `class_margin` stable convergence metrics. The runtime and training path can
 still sample ops.
 
+Class tasks also report `balanced_accuracy`, the mean per-class recall. This is
+the main classification metric when labels are imbalanced or predictions are
+biased. The `mnist-01` dataset builder now samples a balanced count of zeros and
+ones for both train and test splits.
+
 For `mnist-01`, class margin rises under usage-aware rejection even when accuracy
 wobbles, so the class registers are learning a weak signal. The remaining issue
 is turning that weak register separation into stable convergence.
