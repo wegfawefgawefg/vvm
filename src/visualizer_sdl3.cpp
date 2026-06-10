@@ -1,4 +1,4 @@
-#include "nnvm/model.hpp"
+#include "vvm/model.hpp"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace nnvm {
+namespace vvm {
 namespace {
 
 void throw_sdl_error(const char* message) {
@@ -60,7 +60,7 @@ int run_visualizer(const Config& config) {
 
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("canned-nnvm trace", 960, 540, SDL_WINDOW_RESIZABLE, &window,
+    if (!SDL_CreateWindowAndRenderer("vvm trace", 960, 540, SDL_WINDOW_RESIZABLE, &window,
                                      &renderer)) {
         SDL_Quit();
         throw_sdl_error("SDL_CreateWindowAndRenderer failed");
@@ -91,8 +91,8 @@ int run_visualizer(const Config& config) {
     SDL_DestroyWindow(window);
     SDL_Quit();
 
-    std::cout << "visualized " << result.trace.size() << " NNVM steps\n";
+    std::cout << "visualized " << result.trace.size() << " VVM steps\n";
     return 0;
 }
 
-} // namespace nnvm
+} // namespace vvm

@@ -1,4 +1,4 @@
-# PNVM Seed Spec
+# VVM Seed Spec
 
 The initial machine is:
 

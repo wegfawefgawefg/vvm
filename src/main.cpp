@@ -1,4 +1,4 @@
-#include "nnvm/model.hpp"
+#include "vvm/model.hpp"
 
 #include <charconv>
 #include <exception>
@@ -7,8 +7,8 @@
 #include <string_view>
 #include <vector>
 
-#ifdef NNVM_WITH_SDL3
-namespace nnvm {
+#ifdef VVM_WITH_SDL3
+namespace vvm {
 int run_visualizer(const Config& config);
 }
 #endif
@@ -17,9 +17,9 @@ namespace {
 
 void print_usage() {
     std::cout << "usage:\n"
-              << "  nnvm smoke\n"
-              << "  nnvm run [--steps N] [--state-dim N] [--ops N] [--top-k N] [--temperature F]\n"
-              << "  nnvm visualize [--steps N] [--state-dim N] [--ops N] [--top-k N]\n";
+              << "  vvm smoke\n"
+              << "  vvm run [--steps N] [--state-dim N] [--ops N] [--top-k N] [--temperature F]\n"
+              << "  vvm visualize [--steps N] [--state-dim N] [--ops N] [--top-k N]\n";
 }
 
 bool parse_size(std::string_view value, std::size_t& out) {
@@ -36,7 +36,7 @@ bool parse_float(std::string_view value, float& out) {
     return parsed.ec == std::errc{} && parsed.ptr == end;
 }
 
-bool parse_config(std::span<char*> args, nnvm::Config& config) {
+bool parse_config(std::span<char*> args, vvm::Config& config) {
     for (std::size_t i = 0; i < args.size(); ++i) {
         const std::string_view arg(args[i]);
         if (i + 1 >= args.size()) {
@@ -74,16 +74,16 @@ bool parse_config(std::span<char*> args, nnvm::Config& config) {
     return true;
 }
 
-int run_headless(const nnvm::Config& config) {
-    const nnvm::Model model(config);
+int run_headless(const vvm::Config& config) {
+    const vvm::Model model(config);
     const std::vector<float> initial_state = model.seeded_state();
-    const nnvm::RunResult result = model.run(initial_state);
+    const vvm::RunResult result = model.run(initial_state);
 
     std::cout << "steps=" << config.steps << " state_dim=" << config.state_dim
               << " ops=" << config.num_ops << " top_k=" << config.top_k << '\n';
 
     for (std::size_t i = 0; i < result.trace.size(); ++i) {
-        const nnvm::StepTrace& trace = result.trace[i];
+        const vvm::StepTrace& trace = result.trace[i];
         std::cout << "step " << i << " max_score=" << trace.retrieval.max_score
                   << " state_norm=" << trace.state_norm << " gate_mean=" << trace.gate_mean
                   << " top_op=" << trace.retrieval.indices.front() << '\n';
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
     }
 
     try {
-        nnvm::Config config{};
+        vvm::Config config{};
         const std::string_view command(argv[1]);
         const std::span<char*> options(argv + 2, static_cast<std::size_t>(argc - 2));
         if (!parse_config(options, config)) {
@@ -113,8 +113,8 @@ int main(int argc, char** argv) {
         }
 
         if (command == "visualize") {
-#ifdef NNVM_WITH_SDL3
-            return nnvm::run_visualizer(config);
+#ifdef VVM_WITH_SDL3
+            return vvm::run_visualizer(config);
 #else
             std::cerr << "visualizer was not built. Reconfigure with cmake --preset dev-sdl3.\n";
             return 2;

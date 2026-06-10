@@ -1,4 +1,4 @@
-#include "nnvm/model.hpp"
+#include "vvm/model.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -6,7 +6,7 @@
 #include <random>
 #include <stdexcept>
 
-namespace nnvm {
+namespace vvm {
 namespace {
 
 float dot(std::span<const float> a, std::span<const float> b) {
@@ -203,4 +203,4 @@ RunResult Model::run(std::span<const float> initial_state) const {
     return result;
 }
 
-} // namespace nnvm
+} // namespace vvm

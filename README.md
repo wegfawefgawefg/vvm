@@ -1,8 +1,8 @@
-# canned-nnvm
+# vvm
 
-Seed repo for a C++ purely neural virtual machine experiment.
+Seed repo for a C++ Vector Virtual Machine experiment.
 
-The first target is a tiny PNVM/NNVM core:
+The first target is a tiny VVM core:
 
 ```text
 state -> nearest ops -> gated residual update -> next state
@@ -27,25 +27,25 @@ SDL3 visualizer build:
 ```sh
 cmake --preset dev-sdl3
 cmake --build --preset dev-sdl3
-./build-sdl3/nnvm visualize
+./build-sdl3/vvm visualize
 ```
 
 ## CLI
 
 ```sh
-./build/nnvm smoke
-./build/nnvm run --steps 8 --state-dim 256 --ops 1024 --top-k 8
-./build-sdl3/nnvm visualize --steps 256
+./build/vvm smoke
+./build/vvm run --steps 8 --state-dim 256 --ops 1024 --top-k 8
+./build-sdl3/vvm visualize --steps 256
 ```
 
-`smoke` and `run` are headless. `visualize` requires `NNVM_BUILD_VISUALIZER=ON`
+`smoke` and `run` are headless. `visualize` requires `VVM_BUILD_VISUALIZER=ON`
 and SDL3.
 
 ## Layout
 
-- `include/nnvm/`: public core interfaces.
+- `include/vvm/`: public core interfaces.
 - `src/model.cpp`: state/op-bank/retrieval/update implementation.
 - `src/main.cpp`: CLI entry point.
 - `src/visualizer_sdl3.cpp`: SDL3 inspection path.
 - `tests/`: deterministic core smoke tests.
-- `docs/pnvm-seed-spec.md`: seed architecture notes.
+- `docs/vvm-seed-spec.md`: seed architecture notes.

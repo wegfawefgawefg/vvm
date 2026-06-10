@@ -5,7 +5,7 @@
 #include <span>
 #include <vector>
 
-namespace nnvm {
+namespace vvm {
 
 struct Config {
     std::size_t state_dim = 256;
@@ -61,4 +61,4 @@ class Model {
 [[nodiscard]] float l2_norm(std::span<const float> values);
 [[nodiscard]] float cosine_similarity(std::span<const float> a, std::span<const float> b);
 
-} // namespace nnvm
+} // namespace vvm

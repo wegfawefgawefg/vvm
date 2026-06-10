@@ -36,7 +36,7 @@
 - Avoid premature reuse that makes local behavior harder to understand.
 - Keep naming concrete and descriptive.
 
-## NNVM Notes
+## VVM Notes
 
 - Keep v0 pure: one recurrent state vector, one homogeneous op bank, shared
   transition, and no separate program counter or key/value memory.

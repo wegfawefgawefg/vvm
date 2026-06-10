@@ -1,4 +1,4 @@
-#include "nnvm/model.hpp"
+#include "vvm/model.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -12,25 +12,25 @@ void test_cosine_similarity() {
     const float b_values[] = {0.0F, 1.0F};
     const float c_values[] = {2.0F, 0.0F};
 
-    assert(std::fabs(nnvm::cosine_similarity(a_values, b_values)) < 1.0e-6F);
-    assert(std::fabs(nnvm::cosine_similarity(a_values, c_values) - 1.0F) < 1.0e-6F);
+    assert(std::fabs(vvm::cosine_similarity(a_values, b_values)) < 1.0e-6F);
+    assert(std::fabs(vvm::cosine_similarity(a_values, c_values) - 1.0F) < 1.0e-6F);
 }
 
 void test_run_shape() {
-    nnvm::Config config{};
+    vvm::Config config{};
     config.state_dim = 16;
     config.num_ops = 32;
     config.top_k = 4;
     config.steps = 3;
 
-    const nnvm::Model model(config);
+    const vvm::Model model(config);
     const std::vector<float> initial_state = model.seeded_state();
-    const nnvm::RunResult result = model.run(initial_state);
+    const vvm::RunResult result = model.run(initial_state);
 
     assert(result.state.size() == config.state_dim);
     assert(result.trace.size() == config.steps);
 
-    for (const nnvm::StepTrace& trace : result.trace) {
+    for (const vvm::StepTrace& trace : result.trace) {
         assert(trace.retrieval.indices.size() == config.top_k);
         assert(trace.retrieval.weights.size() == config.top_k);
         assert(trace.state_norm > 0.0F);
@@ -40,13 +40,13 @@ void test_run_shape() {
 }
 
 void test_invalid_config() {
-    nnvm::Config config{};
+    vvm::Config config{};
     config.num_ops = 2;
     config.top_k = 3;
 
     bool threw = false;
     try {
-        const nnvm::Model model(config);
+        const vvm::Model model(config);
         (void)model;
     } catch (const std::invalid_argument&) {
         threw = true;
@@ -61,6 +61,6 @@ int main() {
     test_run_shape();
     test_invalid_config();
 
-    std::cout << "nnvm core tests passed\n";
+    std::cout << "vvm core tests passed\n";
     return 0;
 }
