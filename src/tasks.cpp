@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -17,14 +18,46 @@
 namespace vvm {
 namespace {
 
+void fill_neutral_unit(std::span<float> values);
+
 void normalize_l2(std::vector<float>& values) {
     const float norm = l2_norm(values);
     if (norm <= 1.0e-8F) {
-        const float fill = 1.0F / std::sqrt(static_cast<float>(values.size()));
-        std::fill(values.begin(), values.end(), fill);
+        fill_neutral_unit(values);
         return;
     }
 
+    for (float& value : values) {
+        value /= norm;
+    }
+}
+
+void fill_neutral_unit(std::span<float> values) {
+    if (values.empty()) {
+        return;
+    }
+
+    float mean = 0.0F;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        std::uint32_t x = static_cast<std::uint32_t>(i + 1U) * 0x9E3779B9U;
+        x ^= x >> 16U;
+        x *= 0x7FEB352DU;
+        x ^= x >> 15U;
+        x *= 0x846CA68BU;
+        x ^= x >> 16U;
+        values[i] = (static_cast<float>(x & 0xFFFFU) / 32767.5F) - 1.0F;
+        mean += values[i];
+    }
+    mean /= static_cast<float>(values.size());
+    for (float& value : values) {
+        value -= mean;
+    }
+
+    const float norm = l2_norm(values);
+    if (norm <= 1.0e-8F) {
+        values.front() = 1.0F;
+        return;
+    }
     for (float& value : values) {
         value /= norm;
     }
@@ -161,6 +194,94 @@ std::ifstream open_binary(const std::filesystem::path& path) {
         throw std::runtime_error("failed to open " + path.string());
     }
     return stream;
+}
+
+void skip_pgm_whitespace_and_comments(std::istream& stream) {
+    while (stream) {
+        const int peeked = stream.peek();
+        if (peeked == '#') {
+            std::string ignored;
+            std::getline(stream, ignored);
+            continue;
+        }
+        if (peeked != std::char_traits<char>::eof() &&
+            std::isspace(static_cast<unsigned char>(peeked)) != 0) {
+            stream.get();
+            continue;
+        }
+        break;
+    }
+}
+
+int read_pgm_int(std::istream& stream, const std::filesystem::path& path) {
+    skip_pgm_whitespace_and_comments(stream);
+    int value = 0;
+    stream >> value;
+    if (!stream) {
+        throw std::runtime_error("failed to read PGM header from " + path.string());
+    }
+    return value;
+}
+
+std::vector<float> read_pgm_28x28(const std::filesystem::path& path) {
+    std::ifstream stream = open_binary(path);
+    std::string magic;
+    stream >> magic;
+    if (magic != "P5") {
+        throw std::runtime_error("expected binary PGM P5 frame: " + path.string());
+    }
+    const int width = read_pgm_int(stream, path);
+    const int height = read_pgm_int(stream, path);
+    const int max_value = read_pgm_int(stream, path);
+    stream.get();
+    if (width != 28 || height != 28 || max_value <= 0 || max_value > 255) {
+        throw std::runtime_error("expected 28x28 8-bit PGM frame: " + path.string());
+    }
+
+    std::array<unsigned char, 784> pixels = {};
+    stream.read(reinterpret_cast<char*>(pixels.data()),
+                static_cast<std::streamsize>(pixels.size()));
+    if (!stream) {
+        throw std::runtime_error("truncated PGM frame: " + path.string());
+    }
+
+    std::vector<float> frame(pixels.size(), 0.0F);
+    for (std::size_t i = 0; i < pixels.size(); ++i) {
+        frame[i] = static_cast<float>(pixels[i]) / static_cast<float>(max_value);
+    }
+    normalize_l2(frame);
+    return frame;
+}
+
+std::vector<std::vector<float>> load_video_frames(const std::filesystem::path& frames_dir) {
+    if (!std::filesystem::is_directory(frames_dir)) {
+        throw std::runtime_error("video frame directory does not exist: " + frames_dir.string());
+    }
+
+    std::vector<std::filesystem::path> paths;
+    for (const std::filesystem::directory_entry& entry :
+         std::filesystem::directory_iterator(frames_dir)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        const std::filesystem::path path = entry.path();
+        const std::string ext = path.extension().string();
+        if (ext == ".pgm" || ext == ".PGM") {
+            paths.push_back(path);
+        }
+    }
+    std::sort(paths.begin(), paths.end());
+    if (paths.size() < 2U) {
+        throw std::runtime_error("video-next requires at least two .pgm frames in " +
+                                 frames_dir.string());
+    }
+
+    std::vector<std::vector<float>> frames;
+    frames.reserve(paths.size());
+    for (const std::filesystem::path& path : paths) {
+        frames.push_back(read_pgm_28x28(path));
+    }
+    return frames;
 }
 
 float class_loss_weight_or(float configured, float fallback) {
@@ -358,6 +479,74 @@ void append_mnist_binary_split(std::vector<TaskSample>& samples,
     }
 }
 
+TaskSample make_video_next_sample(const std::vector<float>& input_frame,
+                                  const std::vector<float>& target_frame, std::size_t state_dim,
+                                  const TaskConfig& task_config) {
+    constexpr std::size_t kImageDims = 784;
+    constexpr std::size_t kInputOffset = 0;
+    constexpr std::size_t kTargetOffset = kImageDims;
+    if (state_dim < kTargetOffset + kImageDims) {
+        throw std::invalid_argument("video-next task requires state_dim >= 1568");
+    }
+    if (input_frame.size() != kImageDims || target_frame.size() != kImageDims) {
+        throw std::invalid_argument("video-next frames must be 28x28");
+    }
+
+    std::vector<float> input(state_dim, 0.0F);
+    std::vector<float> target(state_dim, 0.0F);
+    std::vector<float> target_weights(state_dim, 0.0F);
+    std::copy(input_frame.begin(), input_frame.end(), input.begin() + kInputOffset);
+    if (task_config.video_input_to_output_scale > 0.0F) {
+        for (std::size_t i = 0; i < kImageDims; ++i) {
+            input[kTargetOffset + i] = task_config.video_input_to_output_scale * input_frame[i];
+        }
+    }
+
+    const float image_weight = task_config.world_loss_weight > 0.0F ? 1.0F : 0.0F;
+    const float target_peak =
+        std::max(*std::max_element(target_frame.begin(), target_frame.end()), 1.0e-6F);
+    for (std::size_t i = 0; i < kImageDims; ++i) {
+        target[kTargetOffset + i] = image_weight * target_frame[i];
+        const float foreground = target_frame[i] / target_peak;
+        target_weights[kTargetOffset + i] =
+            task_config.world_loss_weight *
+            (1.0F + (task_config.video_foreground_weight * foreground));
+    }
+    normalize_l2(input);
+    normalize_l2(target);
+
+    return TaskSample{
+        .input = std::move(input),
+        .target = std::move(target),
+        .target_weights = std::move(target_weights),
+        .visual_input_offset = kInputOffset,
+        .visual_target_offset = kTargetOffset,
+    };
+}
+
+TaskDataset make_video_next_dataset(const Config& model_config, const TaskConfig& task_config) {
+    const std::vector<std::vector<float>> frames =
+        load_video_frames(std::filesystem::path(task_config.video_frames_dir));
+
+    TaskDataset dataset{};
+    dataset.train.reserve(task_config.train_samples);
+    dataset.test.reserve(task_config.test_samples);
+
+    auto append_samples = [&](std::vector<TaskSample>& samples, std::size_t count,
+                              std::size_t offset) {
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::size_t frame_index = (offset + i) % frames.size();
+            const std::size_t target_index = (frame_index + 1U) % frames.size();
+            samples.push_back(make_video_next_sample(frames[frame_index], frames[target_index],
+                                                     model_config.state_dim, task_config));
+        }
+    };
+
+    append_samples(dataset.train, task_config.train_samples, 0U);
+    append_samples(dataset.test, task_config.test_samples, task_config.train_samples);
+    return dataset;
+}
+
 TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t index,
                        std::size_t offset, const TaskConfig& task_config, std::mt19937& rng) {
     const std::size_t state_dim = model_config.state_dim;
@@ -467,6 +656,7 @@ TaskSample make_sample(TaskKind task, const Config& model_config, std::size_t in
             .target_weights = {},
         };
     }
+    case TaskKind::VideoNext:
     case TaskKind::Mnist:
     case TaskKind::Mnist01:
         break;
@@ -610,38 +800,6 @@ void record_train_result(const TrainResult& result, LossPoint& loss) {
     }
 }
 
-std::vector<float> target_weights_for_frame(const TaskSample& sample, std::size_t state_dim,
-                                            std::size_t frame, const TaskConfig& task_config) {
-    if (sample.label < 0 || sample.class_count <= 0) {
-        return sample.target_weights;
-    }
-
-    std::vector<float> weights =
-        sample.target_weights.empty() ? uniform_weights(state_dim, 1.0F) : sample.target_weights;
-    const std::size_t class_begin = sample.class_offset;
-    const std::size_t class_end = class_begin + sample.class_dims;
-    if (class_end > weights.size()) {
-        throw std::invalid_argument("class target range exceeds target weights");
-    }
-    if (frame >= task_config.class_start_frame) {
-        if (task_config.class_ramp_frames <= 1U) {
-            return weights;
-        }
-        const std::size_t ramp_step = frame - task_config.class_start_frame + 1U;
-        const float class_weight_scale =
-            std::min(1.0F, static_cast<float>(ramp_step) /
-                               static_cast<float>(task_config.class_ramp_frames));
-        for (std::size_t dim = class_begin; dim < class_end; ++dim) {
-            weights[dim] *= class_weight_scale;
-        }
-        return weights;
-    }
-    for (std::size_t dim = class_begin; dim < class_end; ++dim) {
-        weights[dim] = 0.0F;
-    }
-    return weights;
-}
-
 void finalize_op_usage(LossPoint& loss) {
     std::size_t selected_ops = 0;
     std::size_t max_op_selections = 0;
@@ -712,12 +870,45 @@ void finalize_op_usage(LossPoint& loss) {
 
 } // namespace
 
+std::vector<float> target_weights_for_frame(const TaskSample& sample, std::size_t state_dim,
+                                            std::size_t frame, const TaskConfig& task_config) {
+    if (sample.label < 0 || sample.class_count <= 0) {
+        return sample.target_weights;
+    }
+
+    std::vector<float> weights =
+        sample.target_weights.empty() ? std::vector<float>(state_dim, 1.0F) : sample.target_weights;
+    const std::size_t class_begin = sample.class_offset;
+    const std::size_t class_end = class_begin + sample.class_dims;
+    if (class_end > weights.size()) {
+        throw std::invalid_argument("class target range exceeds target weights");
+    }
+    if (frame >= task_config.class_start_frame) {
+        if (task_config.class_ramp_frames <= 1U) {
+            return weights;
+        }
+        const std::size_t ramp_step = frame - task_config.class_start_frame + 1U;
+        const float class_weight_scale =
+            std::min(1.0F, static_cast<float>(ramp_step) /
+                               static_cast<float>(task_config.class_ramp_frames));
+        for (std::size_t dim = class_begin; dim < class_end; ++dim) {
+            weights[dim] *= class_weight_scale;
+        }
+        return weights;
+    }
+    for (std::size_t dim = class_begin; dim < class_end; ++dim) {
+        weights[dim] = 0.0F;
+    }
+    return weights;
+}
+
 std::vector<float> neutral_state(std::size_t state_dim) {
     if (state_dim == 0U) {
         throw std::invalid_argument("state_dim must be nonzero");
     }
 
-    std::vector<float> state(state_dim, 1.0F / std::sqrt(static_cast<float>(state_dim)));
+    std::vector<float> state(state_dim, 0.0F);
+    fill_neutral_unit(state);
     return state;
 }
 
@@ -764,6 +955,12 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     if (task_config.world_loss_weight < 0.0F) {
         throw std::invalid_argument("world_loss_weight must be nonnegative");
     }
+    if (task_config.video_foreground_weight < 0.0F) {
+        throw std::invalid_argument("video_foreground_weight must be nonnegative");
+    }
+    if (task_config.video_input_to_output_scale < 0.0F) {
+        throw std::invalid_argument("video_input_to_output_scale must be nonnegative");
+    }
     if (model_config.state_dim == 0U) {
         throw std::invalid_argument("state_dim must be nonzero");
     }
@@ -772,6 +969,9 @@ TaskDataset make_task_dataset(const Config& model_config, const TaskConfig& task
     }
     if (task_config.task == TaskKind::Mnist01) {
         return make_mnist_binary_dataset(model_config, task_config);
+    }
+    if (task_config.task == TaskKind::VideoNext) {
+        return make_video_next_dataset(model_config, task_config);
     }
 
     std::mt19937 rng(task_config.seed);
@@ -808,6 +1008,8 @@ const char* task_name(TaskKind task) {
         return "xor";
     case TaskKind::SineNext:
         return "sine-next";
+    case TaskKind::VideoNext:
+        return "video-next";
     case TaskKind::Mnist01:
         return "mnist-01";
     case TaskKind::Mnist:
@@ -1043,6 +1245,7 @@ LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_sampl
         const TaskSample& sample = train_samples[order[order_index]];
         validate_sample(sample, model.config().state_dim);
 
+        model.reset_runtime();
         std::vector<float> state = neutral_state(model.config().state_dim);
         std::vector<Tick> window;
         window.reserve(task_config.window_size);

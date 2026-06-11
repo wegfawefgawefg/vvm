@@ -9,6 +9,7 @@ compile_commands.json
 .clangd/
 .idea/
 .DS_Store
+imgui.ini
 
 *.d
 *.o
@@ -45,6 +46,7 @@ artifacts/
 checkpoints/
 datasets/
 resources/mnist/
+resources/video/
 logs/
 *.pt
 *.pth

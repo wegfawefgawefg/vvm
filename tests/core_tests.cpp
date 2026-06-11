@@ -60,6 +60,8 @@ void test_checkpoint_round_trip() {
     config.candidate_count = 4;
     config.sample_candidate_count = 2;
     config.update_scale = 1.5F;
+    config.transition = vvm::TransitionKind::Tangent;
+    config.hard_refractory_ticks = 3;
 
     vvm::Model model(config);
     const std::filesystem::path path =
@@ -74,6 +76,86 @@ void test_checkpoint_round_trip() {
     }
 
     std::filesystem::remove(path);
+}
+
+void test_tangent_transition_does_not_reinforce_current_direction() {
+    vvm::Config additive_config{};
+    additive_config.state_dim = 2;
+    additive_config.num_ops = 1;
+    additive_config.candidate_count = 1;
+    additive_config.sample_candidate_count = 0;
+    additive_config.sample_retrieval = false;
+    additive_config.activation = vvm::ActivationKind::Clamp;
+    additive_config.update_scale = 1.0F;
+
+    vvm::Config tangent_config = additive_config;
+    tangent_config.transition = vvm::TransitionKind::Tangent;
+
+    const float op_values[] = {1.0F, 0.0F};
+    std::vector<float> additive_state = {1.0F, 0.0F};
+    std::vector<float> tangent_state = additive_state;
+    std::mt19937 additive_rng(additive_config.seed);
+    std::mt19937 tangent_rng(tangent_config.seed);
+
+    vvm::Model additive_model(additive_config);
+    additive_model.replace_op_bank(op_values);
+    vvm::Model tangent_model(tangent_config);
+    tangent_model.replace_op_bank(op_values);
+
+    const vvm::Tick additive_tick = additive_model.tick(additive_state, additive_rng, 0);
+    const vvm::Tick tangent_tick = tangent_model.tick(tangent_state, tangent_rng, 0);
+
+    assert(additive_tick.pre_activation[0] > 1.5F);
+    assert(std::fabs(tangent_tick.pre_activation[0] - 1.0F) < 1.0e-6F);
+    assert(std::fabs(tangent_tick.pre_activation[1]) < 1.0e-6F);
+}
+
+void test_hard_refractory_blocks_immediate_reselection() {
+    vvm::Config config{};
+    config.state_dim = 2;
+    config.num_ops = 2;
+    config.candidate_count = 2;
+    config.sample_candidate_count = 0;
+    config.sample_retrieval = false;
+    config.activation = vvm::ActivationKind::Clamp;
+    config.update_scale = 0.0F;
+    config.hard_refractory_ticks = 1;
+
+    vvm::Model model(config);
+    const float ops[] = {1.0F, 0.0F, 0.0F, 1.0F};
+    model.replace_op_bank(ops);
+
+    std::vector<float> state = {1.0F, 0.0F};
+    std::mt19937 rng(config.seed);
+    const vvm::Tick first = model.tick(state, rng, 0);
+    const vvm::Tick second = model.tick(state, rng, 1);
+
+    assert(first.chosen_op == 0U);
+    assert(second.chosen_op == 1U);
+}
+
+void test_hard_refractory_all_locked_falls_back() {
+    vvm::Config config{};
+    config.state_dim = 2;
+    config.num_ops = 1;
+    config.candidate_count = 1;
+    config.sample_candidate_count = 0;
+    config.sample_retrieval = false;
+    config.activation = vvm::ActivationKind::Clamp;
+    config.update_scale = 0.0F;
+    config.hard_refractory_ticks = 8;
+
+    vvm::Model model(config);
+    const float ops[] = {1.0F, 0.0F};
+    model.replace_op_bank(ops);
+
+    std::vector<float> state = {1.0F, 0.0F};
+    std::mt19937 rng(config.seed);
+    const vvm::Tick first = model.tick(state, rng, 0);
+    const vvm::Tick second = model.tick(state, rng, 1);
+
+    assert(first.chosen_op == 0U);
+    assert(second.chosen_op == 0U);
 }
 
 void test_retrieval_temperature_sharpens_candidate_weights() {
@@ -780,6 +862,9 @@ int main() {
     test_dot_product();
     test_run_shape();
     test_checkpoint_round_trip();
+    test_tangent_transition_does_not_reinforce_current_direction();
+    test_hard_refractory_blocks_immediate_reselection();
+    test_hard_refractory_all_locked_falls_back();
     test_retrieval_temperature_sharpens_candidate_weights();
     test_sample_candidate_count_caps_sampled_rank();
     test_prediction_error();

@@ -22,8 +22,9 @@ int run_visualizer(const Config& config);
 int run_training_visualizer(const Config& config, const TaskConfig& task_config,
                             std::size_t epochs);
 int run_probe_visualizer(const Config& config, const TaskConfig& task_config, std::size_t epochs,
-                         bool restore_best, bool anchor_to_best,
-                         const std::string& load_model_path);
+                         bool restore_best, bool anchor_to_best, const std::string& load_model_path,
+                         const std::string& save_model_path);
+int run_live_training_visualizer(const Config& config, const TaskConfig& task_config);
 } // namespace vvm
 #endif
 
@@ -50,19 +51,24 @@ void print_usage() {
     std::cout << "usage:\n"
               << "  vvm smoke\n"
               << "  vvm run [--steps N] [--state-dim N] [--ops N] [--candidates N] "
-                 "[--activation deadzone] [--update-scale F] "
+                 "[--activation deadzone] [--transition additive|tangent] [--update-scale F] "
                  "[--retrieval-temperature F] [--state-heat F] [--op-heat F] "
-                 "[--heat-decay F] [--sample-candidates N] [--hard-retrieval]\n"
+                 "[--heat-decay F] [--hard-refractory-ticks N] "
+                 "[--sample-candidates N] [--hard-retrieval]\n"
               << "  vvm train-task [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--task copy-input|delayed-copy|linear-2|basis-4|alternating-bit|xor|"
-                 "sine-next|mnist-01|mnist] "
-                 "[--mnist-dir PATH] [--vectors signed|nonnegative] [--sample-frames N] "
+                 "sine-next|video-next|mnist-01|mnist] "
+                 "[--mnist-dir PATH] [--video-frames-dir PATH] "
+                 "[--vectors signed|nonnegative] [--sample-frames N] "
+                 "[--transition additive|tangent] "
                  "[--idle-frames N] [--window N] [--train-interval N] "
-                 "[--sample-candidates N] "
+                 "[--sample-candidates N] [--hard-refractory-ticks N] "
                  "[--class-start-frame N] [--class-ramp-frames N] "
                  "[--class-registers N] [--lr F] [--lr-decay F] "
                  "[--momentum F] [--class-loss-weight F] "
-                 "[--world-loss-weight F] [--class-value-scale F] [--rejection-decay F] "
+                 "[--world-loss-weight F] [--video-foreground-weight F] "
+                 "[--video-input-to-output-scale F] "
+                 "[--class-value-scale F] [--rejection-decay F] "
                  "[--rejection-overuse-scale F] "
                  "[--affinity-retain-scale F] "
                  "[--affinity-retain-threshold F] [--affinity-retain-underuse-scale F] "
@@ -81,10 +87,15 @@ void print_usage() {
                  "[--update-scale F] [--state-heat F] [--op-heat F] [--heat-decay F]\n"
               << "  vvm visualize-train [--epochs N] [--train-samples N] [--test-samples N] "
                  "[--sample-frames N] [--idle-frames N] [--window N] [--lr F]\n"
-              << "  vvm visualize-probe [--load-model PATH] [--epochs N] [train-task options]\n";
+              << "  vvm visualize-probe [--load-model PATH] [--save-model PATH] [--epochs N] "
+                 "[train-task options]\n"
+              << "  vvm visualize-live-train [train-task options]\n";
     std::cout << "notes:\n"
               << "  deadzone is the main VVM activation. relu, leaky-relu, and clamp are "
-                 "ablation/control modes.\n";
+                 "ablation/control modes.\n"
+              << "  additive is the original transition. tangent removes the selected op's "
+                 "already-aligned state component as a math ablation.\n"
+              << "  --hard-refractory-ticks N excludes recently fired ops from retrieval.\n";
 }
 
 bool parse_size(std::string_view value, std::size_t& out) {
@@ -130,6 +141,10 @@ bool parse_task(std::string_view value, vvm::TaskKind& out) {
         out = vvm::TaskKind::SineNext;
         return true;
     }
+    if (value == "video-next" || value == "video" || value == "next-frame") {
+        out = vvm::TaskKind::VideoNext;
+        return true;
+    }
     if (value == "mnist-01" || value == "mnist01" || value == "mnist-0-1") {
         out = vvm::TaskKind::Mnist01;
         return true;
@@ -156,6 +171,18 @@ bool parse_activation(std::string_view value, vvm::ActivationKind& out) {
     }
     if (value == "deadzone" || value == "hardshrink" || value == "signed-threshold") {
         out = vvm::ActivationKind::Deadzone;
+        return true;
+    }
+    return false;
+}
+
+bool parse_transition(std::string_view value, vvm::TransitionKind& out) {
+    if (value == "additive" || value == "add" || value == "direct") {
+        out = vvm::TransitionKind::Additive;
+        return true;
+    }
+    if (value == "tangent" || value == "orthogonal" || value == "sideways") {
+        out = vvm::TransitionKind::Tangent;
         return true;
     }
     return false;
@@ -195,6 +222,16 @@ const char* activation_name(vvm::ActivationKind activation) {
         return "clamp";
     case vvm::ActivationKind::Deadzone:
         return "deadzone";
+    }
+    return "unknown";
+}
+
+const char* transition_name(vvm::TransitionKind transition) {
+    switch (transition) {
+    case vvm::TransitionKind::Additive:
+        return "additive";
+    case vvm::TransitionKind::Tangent:
+        return "tangent";
     }
     return "unknown";
 }
@@ -251,12 +288,18 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             if (!parse_activation(value, config.activation)) {
                 return false;
             }
+        } else if (arg == "--transition") {
+            if (!parse_transition(value, config.transition)) {
+                return false;
+            }
         } else if (arg == "--vectors" || arg == "--vector-range") {
             if (!parse_vector_range(value, task_config.vector_range)) {
                 return false;
             }
         } else if (arg == "--mnist-dir") {
             task_config.mnist_dir = std::string(value);
+        } else if (arg == "--video-frames-dir" || arg == "--video-dir") {
+            task_config.video_frames_dir = std::string(value);
         } else if (arg == "--steps") {
             if (!parse_size(value, config.steps)) {
                 return false;
@@ -311,6 +354,10 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--curiosity-scale") {
             if (!parse_float(value, config.curiosity_scale)) {
+                return false;
+            }
+        } else if (arg == "--hard-refractory-ticks") {
+            if (!parse_size(value, config.hard_refractory_ticks)) {
                 return false;
             }
         } else if (arg == "--epochs") {
@@ -429,6 +476,14 @@ bool parse_options(std::span<char*> args, vvm::Config& config, vvm::TaskConfig& 
             }
         } else if (arg == "--world-loss-weight") {
             if (!parse_float(value, task_config.world_loss_weight)) {
+                return false;
+            }
+        } else if (arg == "--video-foreground-weight") {
+            if (!parse_float(value, task_config.video_foreground_weight)) {
+                return false;
+            }
+        } else if (arg == "--video-input-to-output-scale") {
+            if (!parse_float(value, task_config.video_input_to_output_scale)) {
                 return false;
             }
         } else if (arg == "--class-loss-weight") {
@@ -729,6 +784,8 @@ int run_headless(const vvm::Config& config) {
     std::cout << "steps=" << config.steps << " state_dim=" << config.state_dim
               << " ops=" << config.num_ops << " candidates=" << config.candidate_count
               << " activation=" << activation_name(config.activation)
+              << " transition=" << transition_name(config.transition)
+              << " hard_refractory_ticks=" << config.hard_refractory_ticks
               << " params=" << model.parameter_count() << " param_bytes=" << model.parameter_bytes()
               << '\n';
 
@@ -756,8 +813,10 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " train_samples=" << dataset.train.size()
               << " test_samples=" << dataset.test.size()
               << " activation=" << activation_name(config.activation)
+              << " transition=" << transition_name(config.transition)
               << " retrieval_temperature=" << config.retrieval_temperature
               << " sample_candidates=" << config.sample_candidate_count
+              << " hard_refractory_ticks=" << config.hard_refractory_ticks
               << " vectors=" << vector_range_name(task_config.vector_range)
               << " sample_frames=" << task_config.frames_per_sample
               << " idle_frames=" << task_config.idle_frames_between_samples
@@ -766,6 +825,7 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " class_start_frame=" << task_config.class_start_frame
               << " class_ramp_frames=" << task_config.class_ramp_frames
               << " class_registers=" << task_config.class_registers
+              << " video_frames_dir=" << task_config.video_frames_dir
               << " lr=" << task_config.learning_rate
               << " lr_decay=" << task_config.learning_rate_decay
               << " momentum=" << task_config.momentum
@@ -779,6 +839,8 @@ int run_task_training(const vvm::Config& config, const vvm::TaskConfig& task_con
               << " op_anchor_scale=" << task_config.op_anchor_scale
               << " anchor_to_best=" << (cli_options.anchor_to_best ? 1 : 0)
               << " world_loss_weight=" << task_config.world_loss_weight
+              << " video_foreground_weight=" << task_config.video_foreground_weight
+              << " video_input_to_output_scale=" << task_config.video_input_to_output_scale
               << " class_value_scale=" << task_config.class_value_scale
               << " class_loss_weight=" << task_config.class_loss_weight
               << " restore_best=" << (cli_options.restore_best ? 1 : 0)
@@ -1254,6 +1316,8 @@ int run_task_benchmarks(vvm::Config config, vvm::TaskConfig base_task_config, st
     std::cout << "task_bench" << " epochs=" << epochs << " state_dim=" << config.state_dim
               << " ops=" << config.num_ops << " candidates=" << config.candidate_count
               << " activation=" << activation_name(config.activation)
+              << " transition=" << transition_name(config.transition)
+              << " hard_refractory_ticks=" << config.hard_refractory_ticks
               << " vectors=" << vector_range_name(base_task_config.vector_range)
               << " train_samples=" << base_task_config.train_samples
               << " test_samples=" << base_task_config.test_samples
@@ -1375,7 +1439,17 @@ int main(int argc, char** argv) {
 #ifdef VVM_WITH_SDL3
             return vvm::run_probe_visualizer(config, task_config, cli_options.epochs,
                                              cli_options.restore_best, cli_options.anchor_to_best,
-                                             cli_options.load_model_path);
+                                             cli_options.load_model_path,
+                                             cli_options.save_model_path);
+#else
+            std::cerr << "visualizer was not built. Reconfigure with cmake --preset dev-sdl3.\n";
+            return 2;
+#endif
+        }
+
+        if (command == "visualize-live-train") {
+#ifdef VVM_WITH_SDL3
+            return vvm::run_live_training_visualizer(config, task_config);
 #else
             std::cerr << "visualizer was not built. Reconfigure with cmake --preset dev-sdl3.\n";
             return 2;

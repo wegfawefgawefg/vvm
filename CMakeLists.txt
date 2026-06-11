@@ -57,6 +57,17 @@ function(vvm_fetch_sdl3)
     FetchContent_MakeAvailable(SDL3)
 endfunction()
 
+function(vvm_fetch_imgui)
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        # v1.92.7
+        GIT_TAG dac07199cfd761113d966eb8ad739254e10df2fe
+    )
+    FetchContent_MakeAvailable(imgui)
+    set(imgui_SOURCE_DIR "${imgui_SOURCE_DIR}" PARENT_SCOPE)
+endfunction()
+
 function(vvm_find_system_sdl3 out_var)
     find_package(SDL3 3.4.0 CONFIG QUIET)
     if (SDL3_FOUND)
@@ -89,6 +100,12 @@ if (VVM_BUILD_VISUALIZER)
         endif()
         message(STATUS "Using system SDL3 dependency.")
     endif()
+
+    if (VVM_FETCH_DEPS)
+        vvm_fetch_imgui()
+    else()
+        message(FATAL_ERROR "VVM visualizer ImGui support currently requires VVM_FETCH_DEPS=ON.")
+    endif()
 endif()
 
 add_library(vvm_core STATIC
@@ -115,11 +132,27 @@ if (VVM_BUILD_CLI)
     vvm_apply_warnings(vvm)
 
     if (VVM_BUILD_VISUALIZER)
+        set(VVM_IMGUI_SOURCES
+            ${imgui_SOURCE_DIR}/imgui.cpp
+            ${imgui_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+        )
+        if (NOT MSVC)
+            set_source_files_properties(${VVM_IMGUI_SOURCES} PROPERTIES COMPILE_OPTIONS -w)
+        endif()
         target_sources(vvm PRIVATE
             src/sdl_text.cpp
             src/visualizer_sdl3.cpp
+            ${VVM_IMGUI_SOURCES}
         )
         target_compile_definitions(vvm PRIVATE VVM_WITH_SDL3=1)
+        target_include_directories(vvm PRIVATE
+            "${imgui_SOURCE_DIR}"
+            "${imgui_SOURCE_DIR}/backends"
+        )
         target_link_libraries(vvm PRIVATE SDL3::SDL3)
     endif()
 endif()

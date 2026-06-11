@@ -41,6 +41,74 @@ The state is normalized after major perturbations. This keeps dot-product
 retrieval meaningful and prevents runaway magnitude from becoming the whole
 addressing scheme.
 
+## Route Stability And Mini-Loops
+
+Hard retrieval exposed a real failure mode: if the selected op is also the
+vector added back into state, the state can fall into a one-op loop. Forbidding
+self-selection is not a real fix because it can just create two-op or small
+cycle loops.
+
+The brain-like ways to avoid this are likely a bundle of mechanisms, not a
+single rule:
+
+1. **Refractory / fatigue**: recently active units become temporarily harder to
+   activate again. This does not make self-selection impossible; it only makes
+   repetition pay a short-term cost.
+2. **Inhibition**: an active assembly suppresses itself and similar neighboring
+   assemblies for a short time. This pushes the system out of tiny local basins
+   without changing the op vectors.
+3. **Asymmetric connectivity**: activity in one assembly drives downstream
+   assemblies through directional synapses. The active pattern can address the
+   next computation without simply amplifying itself.
+4. **Oscillation / phase**: the same assembly at different clock phases does not
+   have exactly the same effect. A temporal coordinate can help routes move
+   forward.
+5. **Continuous world/body disturbance**: sensory input, motor feedback, reward,
+   chemistry, and noise keep the trajectory from being a sealed normalized
+   loop.
+6. **Multiple timescales**: fast activation, medium fatigue/adaptation, and slow
+   weight learning interact. VVM initially had fast state updates and slow op
+   learning, but no cheap medium-timescale route adaptation.
+
+The first implemented route-stability mechanism keeps the pure `op == address
+== effect` model. It does not introduce separate keys or values.
+
+```text
+score_i = dot(S_t, op_i)
+```
+
+After choosing op `c`, the VM records the current tick:
+
+```text
+last_fired_tick[c] = tick
+```
+
+On later retrieval:
+
+```text
+if tick - last_fired_tick[i] <= hard_refractory_ticks:
+    op_i is excluded from the candidate set
+```
+
+If every op is locked out, retrieval falls back to all ops so the machine never
+stalls. This is runtime state, not learned parameters. It is intended to break
+one-op dwell loops while preserving the homogeneous op table.
+
+Control:
+
+```text
+--hard-refractory-ticks N
+```
+
+The default is zero so old experiments remain comparable. A first useful probe
+value is `4`.
+
+The optional `--transition tangent` mode is a mathematical ablation, not a
+biological claim. It removes the selected op's already-aligned component before
+adding it to state. That tests whether additive self-reinforcement is part of a
+failure mode, but the main biologically plausible route control is the hard
+refractory lockout.
+
 ## Sockets And Connectors
 
 The VVM core should stay small:
@@ -124,6 +192,24 @@ path. Both losses push through the same state trajectory and selected op, with
 dimension weights and timing controlling how much each constraint contributes.
 The current MNIST task keeps reconstruction active while adding class pressure;
 it is not an image-address/class-write machine.
+
+For temporal video prediction, using the same dimensions for current input and
+next-frame output is a bad test. It asks the state to hold the current sensory
+frame while also becoming the future frame. That caps accuracy whenever motion
+is not tiny, and it rewards copying the input more than predicting the future.
+
+The current `video-next` task therefore uses fixed state regions:
+
+```text
+state[0..783]       current 28x28 video input socket
+state[784..1567]    predicted next-frame output socket
+```
+
+This is not a learned connector and not a key/value split. The whole state still
+addresses ops, and every selected op can update every dimension. The fixed
+regions only say where the world writes the current frame and where the loss
+looks for the next frame. That makes the task a real temporal prediction test
+instead of an input-reconstruction shortcut.
 
 Current diagnostic ladder:
 

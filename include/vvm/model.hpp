@@ -16,6 +16,11 @@ enum class ActivationKind {
     Deadzone,
 };
 
+enum class TransitionKind {
+    Additive,
+    Tangent,
+};
+
 struct Config {
     std::size_t state_dim = 256;
     std::size_t num_ops = 1024;
@@ -23,6 +28,7 @@ struct Config {
     std::size_t sample_candidate_count = 0;
     std::size_t steps = 8;
     ActivationKind activation = ActivationKind::Deadzone;
+    TransitionKind transition = TransitionKind::Additive;
     float update_scale = 1.0F;
     float input_scale = 1.0F;
     float activation_threshold = 0.05F;
@@ -32,6 +38,7 @@ struct Config {
     float op_heat_stddev = 0.0F;
     float heat_decay = 1.0F;
     float curiosity_scale = 1.0F;
+    std::size_t hard_refractory_ticks = 0;
     bool sample_retrieval = true;
     std::uint32_t seed = 0xC0FFEEU;
 };
@@ -132,6 +139,10 @@ class Model {
         return config_;
     }
 
+    [[nodiscard]] Config& mutable_config() {
+        return config_;
+    }
+
     [[nodiscard]] std::span<const float> op_bank() const {
         return op_bank_;
     }
@@ -146,6 +157,8 @@ class Model {
     [[nodiscard]] std::size_t parameter_bytes() const {
         return parameter_count() * sizeof(float);
     }
+
+    void reset_runtime();
 
     [[nodiscard]] RunResult run(std::span<const float> initial_state);
     [[nodiscard]] Tick tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock,
@@ -170,16 +183,19 @@ class Model {
         float activation_mean = 0.0F;
     };
 
-    [[nodiscard]] Retrieval retrieve(std::span<const float> state) const;
-    [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state) const;
+    [[nodiscard]] Retrieval retrieve(std::span<const float> state, std::size_t clock) const;
     [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state,
-                                                        std::mt19937& rng) const;
-    [[nodiscard]] std::vector<float> heat_op_bank(float stddev, std::mt19937& rng);
+                                                        std::size_t clock) const;
+    [[nodiscard]] Prediction predict_from_working_state(std::span<const float> working_state,
+                                                        std::mt19937& rng, std::size_t clock) const;
+    [[nodiscard]] float heat_op(std::size_t op, float stddev, std::mt19937& rng);
+    [[nodiscard]] bool op_is_refractory(std::size_t op, std::size_t clock) const;
     void normalize_op(std::size_t op);
 
     Config config_;
     std::vector<float> op_bank_;
     std::vector<float> op_velocity_;
+    std::vector<std::size_t> op_last_fired_tick_;
 };
 
 [[nodiscard]] float l2_norm(std::span<const float> values);

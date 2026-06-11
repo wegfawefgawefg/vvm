@@ -5,6 +5,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 
@@ -19,11 +20,41 @@ float dot(std::span<const float> a, std::span<const float> b) {
     return sum;
 }
 
+void fill_neutral_unit(std::span<float> values) {
+    if (values.empty()) {
+        return;
+    }
+
+    float mean = 0.0F;
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        std::uint32_t x = static_cast<std::uint32_t>(i + 1U) * 0x9E3779B9U;
+        x ^= x >> 16U;
+        x *= 0x7FEB352DU;
+        x ^= x >> 15U;
+        x *= 0x846CA68BU;
+        x ^= x >> 16U;
+        values[i] = (static_cast<float>(x & 0xFFFFU) / 32767.5F) - 1.0F;
+        mean += values[i];
+    }
+    mean /= static_cast<float>(values.size());
+    for (float& value : values) {
+        value -= mean;
+    }
+
+    const float norm = l2_norm(values);
+    if (norm <= 1.0e-8F) {
+        values.front() = 1.0F;
+        return;
+    }
+    for (float& value : values) {
+        value /= norm;
+    }
+}
+
 void normalize_l2(std::span<float> state) {
     const float norm = l2_norm(state);
     if (norm <= 1.0e-8F) {
-        const float fill = 1.0F / std::sqrt(static_cast<float>(state.size()));
-        std::fill(state.begin(), state.end(), fill);
+        fill_neutral_unit(state);
         return;
     }
 
@@ -127,6 +158,16 @@ float activation_derivative(float value, const Config& config) {
     return 1.0F;
 }
 
+float transition_delta(float op_value, float working_value, float affinity, const Config& config) {
+    switch (config.transition) {
+    case TransitionKind::Additive:
+        return op_value;
+    case TransitionKind::Tangent:
+        return op_value - (affinity * working_value);
+    }
+    return op_value;
+}
+
 } // namespace
 
 float l2_norm(std::span<const float> values) {
@@ -186,6 +227,7 @@ Model::Model(Config config) : config_(config) {
 
     op_bank_.resize(config_.num_ops * config_.state_dim);
     op_velocity_.assign(op_bank_.size(), 0.0F);
+    op_last_fired_tick_.assign(config_.num_ops, std::numeric_limits<std::size_t>::max());
 
     for (float& value : op_bank_) {
         value = init(rng);
@@ -194,6 +236,11 @@ Model::Model(Config config) : config_(config) {
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
         normalize_op(op);
     }
+}
+
+void Model::reset_runtime() {
+    std::fill(op_last_fired_tick_.begin(), op_last_fired_tick_.end(),
+              std::numeric_limits<std::size_t>::max());
 }
 
 std::vector<float> Model::seeded_state(float scale) const {
@@ -215,6 +262,7 @@ void Model::replace_op_bank(std::span<const float> op_bank) {
 
     op_bank_.assign(op_bank.begin(), op_bank.end());
     op_velocity_.assign(op_bank_.size(), 0.0F);
+    reset_runtime();
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
         normalize_op(op);
     }
@@ -231,13 +279,16 @@ void Model::save_checkpoint(const std::string& path) const {
         throw std::runtime_error("failed to open checkpoint for write: " + path);
     }
 
-    const char magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '1'};
+    const char magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '4'};
     const std::uint64_t state_dim = static_cast<std::uint64_t>(config_.state_dim);
     const std::uint64_t num_ops = static_cast<std::uint64_t>(config_.num_ops);
     const std::uint64_t candidate_count = static_cast<std::uint64_t>(config_.candidate_count);
     const std::uint64_t sample_candidate_count =
         static_cast<std::uint64_t>(config_.sample_candidate_count);
     const std::uint64_t activation = static_cast<std::uint64_t>(config_.activation);
+    const std::uint64_t transition = static_cast<std::uint64_t>(config_.transition);
+    const std::uint64_t hard_refractory_ticks =
+        static_cast<std::uint64_t>(config_.hard_refractory_ticks);
     const std::uint32_t seed = config_.seed;
     const float scalars[] = {
         config_.update_scale,          config_.input_scale,
@@ -254,6 +305,8 @@ void Model::save_checkpoint(const std::string& path) const {
     out.write(reinterpret_cast<const char*>(&sample_candidate_count),
               sizeof(sample_candidate_count));
     out.write(reinterpret_cast<const char*>(&activation), sizeof(activation));
+    out.write(reinterpret_cast<const char*>(&transition), sizeof(transition));
+    out.write(reinterpret_cast<const char*>(&hard_refractory_ticks), sizeof(hard_refractory_ticks));
     const std::uint64_t stored_sample_retrieval = config_.sample_retrieval ? 1U : 0U;
     out.write(reinterpret_cast<const char*>(&stored_sample_retrieval),
               sizeof(stored_sample_retrieval));
@@ -278,6 +331,8 @@ void Model::load_checkpoint(const std::string& path) {
     std::uint64_t candidate_count = 0;
     std::uint64_t sample_candidate_count = 0;
     std::uint64_t activation = 0;
+    std::uint64_t transition = 0;
+    std::uint64_t hard_refractory_ticks = 0;
     std::uint64_t stored_sample_retrieval = 0;
     std::uint32_t seed = 0;
     float scalars[9] = {};
@@ -288,17 +343,41 @@ void Model::load_checkpoint(const std::string& path) {
     in.read(reinterpret_cast<char*>(&candidate_count), sizeof(candidate_count));
     in.read(reinterpret_cast<char*>(&sample_candidate_count), sizeof(sample_candidate_count));
     in.read(reinterpret_cast<char*>(&activation), sizeof(activation));
+    const char v4_magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '4'};
+    const char v3_magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '3'};
+    const char v2_magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '2'};
+    const char v1_magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '1'};
+    const bool is_v4 = std::memcmp(magic, v4_magic, sizeof(magic)) == 0;
+    const bool is_v3 = std::memcmp(magic, v3_magic, sizeof(magic)) == 0;
+    const bool is_v2 = std::memcmp(magic, v2_magic, sizeof(magic)) == 0;
+    const bool is_v1 = std::memcmp(magic, v1_magic, sizeof(magic)) == 0;
+    if (is_v4 || is_v3 || is_v2) {
+        in.read(reinterpret_cast<char*>(&transition), sizeof(transition));
+    } else {
+        transition = static_cast<std::uint64_t>(TransitionKind::Additive);
+    }
+    if (is_v4) {
+        in.read(reinterpret_cast<char*>(&hard_refractory_ticks), sizeof(hard_refractory_ticks));
+    }
     in.read(reinterpret_cast<char*>(&stored_sample_retrieval), sizeof(stored_sample_retrieval));
     in.read(reinterpret_cast<char*>(&seed), sizeof(seed));
-    in.read(reinterpret_cast<char*>(scalars), sizeof(scalars));
-    const char expected_magic[8] = {'v', 'v', 'm', 'c', 'k', 'p', 't', '1'};
-    if (!in || std::memcmp(magic, expected_magic, sizeof(magic)) != 0) {
+    if (is_v3) {
+        float legacy_scalars[13] = {};
+        in.read(reinterpret_cast<char*>(legacy_scalars), sizeof(legacy_scalars));
+        std::copy(legacy_scalars, legacy_scalars + 9U, scalars);
+    } else if (is_v4) {
+        in.read(reinterpret_cast<char*>(scalars), sizeof(scalars));
+    } else {
+        in.read(reinterpret_cast<char*>(scalars), sizeof(float) * 9U);
+    }
+    if (!in || (!is_v1 && !is_v2 && !is_v3 && !is_v4)) {
         throw std::runtime_error("invalid VVM checkpoint: " + path);
     }
     if (state_dim != config_.state_dim || num_ops != config_.num_ops ||
         candidate_count != config_.candidate_count ||
         sample_candidate_count != config_.sample_candidate_count ||
-        activation != static_cast<std::uint64_t>(config_.activation) || seed != config_.seed ||
+        activation != static_cast<std::uint64_t>(config_.activation) ||
+        transition != static_cast<std::uint64_t>(config_.transition) || seed != config_.seed ||
         scalars[0] != config_.update_scale || scalars[1] != config_.input_scale ||
         scalars[2] != config_.activation_threshold || scalars[3] != config_.activation_leak ||
         scalars[4] != config_.retrieval_temperature || scalars[5] != config_.state_heat_stddev ||
@@ -335,7 +414,7 @@ std::vector<float> Model::predict_next(std::span<const float> state,
     }
     normalize_l2(working_state);
 
-    return predict_from_working_state(working_state).state;
+    return predict_from_working_state(working_state, 0).state;
 }
 
 float Model::prediction_error(std::span<const float> predicted, std::span<const float> observed) {
@@ -402,34 +481,57 @@ void apply_observation(Tick& tick, std::span<const float> observed, float curios
     }
 }
 
-Retrieval Model::retrieve(std::span<const float> state) const {
+bool Model::op_is_refractory(std::size_t op, std::size_t clock) const {
+    if (config_.hard_refractory_ticks == 0U) {
+        return false;
+    }
+    const std::size_t last_fired = op_last_fired_tick_[op];
+    if (last_fired == std::numeric_limits<std::size_t>::max() || clock <= last_fired) {
+        return false;
+    }
+    return (clock - last_fired) <= config_.hard_refractory_ticks;
+}
+
+Retrieval Model::retrieve(std::span<const float> state, std::size_t clock) const {
     if (state.size() != config_.state_dim) {
         throw std::invalid_argument("state size does not match model state_dim");
     }
 
     std::vector<std::pair<float, std::size_t>> scores;
     scores.reserve(config_.num_ops);
+    std::vector<std::pair<float, std::size_t>> locked_scores;
+    locked_scores.reserve(config_.num_ops);
 
     for (std::size_t op = 0; op < config_.num_ops; ++op) {
         const std::span<const float> op_vector(op_bank_.data() + (op * config_.state_dim),
                                                config_.state_dim);
-        scores.emplace_back(dot_product(state, op_vector), op);
+        const float raw_score = dot_product(state, op_vector);
+        if (op_is_refractory(op, clock)) {
+            locked_scores.emplace_back(raw_score, op);
+        } else {
+            scores.emplace_back(raw_score, op);
+        }
     }
 
-    std::partial_sort(
-        scores.begin(), scores.begin() + static_cast<std::ptrdiff_t>(config_.candidate_count),
-        scores.end(), [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
+    if (scores.empty()) {
+        scores = std::move(locked_scores);
+    }
+
+    const std::size_t result_count = std::min(config_.candidate_count, scores.size());
+    std::partial_sort(scores.begin(), scores.begin() + static_cast<std::ptrdiff_t>(result_count),
+                      scores.end(),
+                      [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
 
     Retrieval retrieval{};
-    retrieval.candidate_indices.resize(config_.candidate_count);
-    retrieval.candidate_weights.resize(config_.candidate_count);
-    retrieval.candidate_scores.resize(config_.candidate_count);
+    retrieval.candidate_indices.resize(result_count);
+    retrieval.candidate_weights.resize(result_count);
+    retrieval.candidate_scores.resize(result_count);
     retrieval.max_score = scores.front().first;
-    const float min_candidate_score = scores[config_.candidate_count - 1U].first;
+    const float min_candidate_score = scores[result_count - 1U].first;
 
     if (config_.retrieval_temperature > 0.0F) {
         float weight_sum = 0.0F;
-        for (std::size_t i = 0; i < config_.candidate_count; ++i) {
+        for (std::size_t i = 0; i < result_count; ++i) {
             retrieval.candidate_indices[i] = scores[i].second;
             retrieval.candidate_scores[i] = scores[i].first;
             retrieval.candidate_weights[i] =
@@ -441,7 +543,7 @@ Retrieval Model::retrieve(std::span<const float> state) const {
         }
     } else {
         float weight_sum = 0.0F;
-        for (std::size_t i = 0; i < config_.candidate_count; ++i) {
+        for (std::size_t i = 0; i < result_count; ++i) {
             retrieval.candidate_indices[i] = scores[i].second;
             retrieval.candidate_scores[i] = scores[i].first;
             retrieval.candidate_weights[i] =
@@ -455,19 +557,22 @@ Retrieval Model::retrieve(std::span<const float> state) const {
     return retrieval;
 }
 
-Model::Prediction Model::predict_from_working_state(std::span<const float> working_state) const {
-    Retrieval retrieval = retrieve(working_state);
+Model::Prediction Model::predict_from_working_state(std::span<const float> working_state,
+                                                    std::size_t clock) const {
+    Retrieval retrieval = retrieve(working_state, clock);
     retrieval.chosen_index = retrieval.candidate_indices.front();
     retrieval.chosen_score = retrieval.max_score;
     const std::span<const float> op_vector(
         op_bank_.data() + (retrieval.chosen_index * config_.state_dim), config_.state_dim);
+    const float affinity = dot_product(working_state, op_vector);
 
     std::vector<float> predicted_state(working_state.begin(), working_state.end());
     std::vector<float> pre_activation(config_.state_dim);
     std::vector<float> post_activation(config_.state_dim);
     float activation_sum = 0.0F;
     for (std::size_t i = 0; i < config_.state_dim; ++i) {
-        pre_activation[i] = predicted_state[i] + (config_.update_scale * op_vector[i]);
+        const float delta = transition_delta(op_vector[i], working_state[i], affinity, config_);
+        pre_activation[i] = predicted_state[i] + (config_.update_scale * delta);
         post_activation[i] = activate(pre_activation[i], config_);
         predicted_state[i] = post_activation[i];
         activation_sum += std::fabs(post_activation[i]);
@@ -484,11 +589,12 @@ Model::Prediction Model::predict_from_working_state(std::span<const float> worki
 }
 
 Model::Prediction Model::predict_from_working_state(std::span<const float> working_state,
-                                                    std::mt19937& rng) const {
-    Retrieval retrieval = retrieve(working_state);
-    const std::size_t sample_count = config_.sample_candidate_count == 0U
-                                         ? retrieval.candidate_weights.size()
-                                         : config_.sample_candidate_count;
+                                                    std::mt19937& rng, std::size_t clock) const {
+    Retrieval retrieval = retrieve(working_state, clock);
+    const std::size_t sample_count =
+        config_.sample_candidate_count == 0U
+            ? retrieval.candidate_weights.size()
+            : std::min(config_.sample_candidate_count, retrieval.candidate_weights.size());
     const std::size_t chosen_rank =
         config_.sample_retrieval
             ? sample_weighted(
@@ -501,13 +607,15 @@ Model::Prediction Model::predict_from_working_state(std::span<const float> worki
                                config_.state_dim));
     const std::span<const float> op_vector(
         op_bank_.data() + (retrieval.chosen_index * config_.state_dim), config_.state_dim);
+    const float affinity = dot_product(working_state, op_vector);
 
     std::vector<float> predicted_state(working_state.begin(), working_state.end());
     std::vector<float> pre_activation(config_.state_dim);
     std::vector<float> post_activation(config_.state_dim);
     float activation_sum = 0.0F;
     for (std::size_t i = 0; i < config_.state_dim; ++i) {
-        pre_activation[i] = predicted_state[i] + (config_.update_scale * op_vector[i]);
+        const float delta = transition_delta(op_vector[i], working_state[i], affinity, config_);
+        pre_activation[i] = predicted_state[i] + (config_.update_scale * delta);
         post_activation[i] = activate(pre_activation[i], config_);
         predicted_state[i] = post_activation[i];
         activation_sum += std::fabs(post_activation[i]);
@@ -529,14 +637,6 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
         throw std::invalid_argument("input size must match model state_dim");
     }
 
-    const float op_heat = decayed(config_.op_heat_stddev, config_.heat_decay, clock);
-    std::vector<float> op_heat_l2_by_op = heat_op_bank(op_heat, rng);
-    float op_heat_l2_sq = 0.0F;
-    for (const float value : op_heat_l2_by_op) {
-        op_heat_l2_sq += value * value;
-    }
-    const float op_heat_l2 = std::sqrt(op_heat_l2_sq);
-
     std::vector<float> state_before(state.begin(), state.end());
     std::vector<float> working_state(state.begin(), state.end());
     for (std::size_t i = 0; i < input.size(); ++i) {
@@ -545,7 +645,18 @@ Tick Model::tick(std::vector<float>& state, std::mt19937& rng, std::size_t clock
     std::vector<float> working_pre_state(working_state.begin(), working_state.end());
     normalize_l2(working_state);
 
-    Prediction prediction = predict_from_working_state(working_state, rng);
+    Prediction prediction = predict_from_working_state(working_state, rng, clock);
+    op_last_fired_tick_[prediction.retrieval.chosen_index] = clock;
+
+    const float op_heat = decayed(config_.op_heat_stddev, config_.heat_decay, clock);
+    std::vector<float> op_heat_l2_by_op;
+    float op_heat_l2 = 0.0F;
+    if (op_heat > 0.0F) {
+        op_heat_l2_by_op.assign(config_.num_ops, 0.0F);
+        op_heat_l2 = heat_op(prediction.retrieval.chosen_index, op_heat, rng);
+        op_heat_l2_by_op[prediction.retrieval.chosen_index] = op_heat_l2;
+    }
+
     state = prediction.state;
 
     const float state_heat = decayed(config_.state_heat_stddev, config_.heat_decay, clock);
@@ -723,6 +834,27 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
         }
     };
 
+    auto add_transition_gradient = [this, &gradients](const Tick& tick,
+                                                      std::span<const float> grad_pre) {
+        const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+        switch (config_.transition) {
+        case TransitionKind::Additive:
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                gradients[op_offset + i] += config_.update_scale * grad_pre[i];
+            }
+            return;
+        case TransitionKind::Tangent: {
+            const float working_projection = dot_product(tick.working_state, grad_pre);
+            for (std::size_t i = 0; i < config_.state_dim; ++i) {
+                gradients[op_offset + i] +=
+                    config_.update_scale *
+                    (grad_pre[i] - (tick.working_state[i] * working_projection));
+            }
+            return;
+        }
+        }
+    };
+
     for (std::size_t tick_index = 0; tick_index < ticks.size(); ++tick_index) {
         const Tick& tick = ticks[tick_index];
         if (tick.predicted_state.size() != config_.state_dim ||
@@ -780,13 +912,12 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
                 normalize_backward(tick.predicted_state, tick.post_activation, grad_pred);
 
             std::vector<float> grad_working(config_.state_dim, 0.0F);
-            const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+            std::vector<float> grad_pre(config_.state_dim, 0.0F);
             for (std::size_t i = 0; i < config_.state_dim; ++i) {
-                const float grad_pre =
-                    activation_derivative(tick.pre_activation[i], config_) * grad_post[i];
-                gradients[op_offset + i] += config_.update_scale * grad_pre;
-                grad_working[i] += grad_pre;
+                grad_pre[i] = activation_derivative(tick.pre_activation[i], config_) * grad_post[i];
+                grad_working[i] += grad_pre[i];
             }
+            add_transition_gradient(tick, grad_pre);
             grad_state_next =
                 normalize_backward(tick.working_state, tick.working_pre_state, grad_working);
             add_rejection_gradient(tick, recency_weight);
@@ -805,12 +936,11 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
             std::vector<float> grad_post =
                 normalize_backward(tick.predicted_state, tick.post_activation, grad_pred);
 
-            const std::size_t op_offset = tick.chosen_op * config_.state_dim;
+            std::vector<float> grad_pre(config_.state_dim, 0.0F);
             for (std::size_t i = 0; i < config_.state_dim; ++i) {
-                gradients[op_offset + i] += config_.update_scale *
-                                            activation_derivative(tick.pre_activation[i], config_) *
-                                            grad_post[i];
+                grad_pre[i] = activation_derivative(tick.pre_activation[i], config_) * grad_post[i];
             }
+            add_transition_gradient(tick, grad_pre);
 
             add_rejection_gradient(tick, recency_weight);
             add_affinity_retain_gradient(tick, recency_weight);
@@ -891,25 +1021,24 @@ TrainResult Model::train_window(std::span<const Tick> ticks, TrainConfig train_c
     };
 }
 
-std::vector<float> Model::heat_op_bank(float stddev, std::mt19937& rng) {
+float Model::heat_op(std::size_t op, float stddev, std::mt19937& rng) {
     if (stddev <= 0.0F) {
-        return {};
+        return 0.0F;
+    }
+    if (op >= config_.num_ops) {
+        throw std::invalid_argument("op index out of range");
     }
 
-    std::vector<float> heat_l2_by_op(config_.num_ops, 0.0F);
     std::normal_distribution<float> noise(0.0F, stddev);
-    for (std::size_t op = 0; op < config_.num_ops; ++op) {
-        const std::size_t op_offset = op * config_.state_dim;
-        float op_heat_norm_sq = 0.0F;
-        for (std::size_t i = 0; i < config_.state_dim; ++i) {
-            const float delta = noise(rng);
-            op_bank_[op_offset + i] += delta;
-            op_heat_norm_sq += delta * delta;
-        }
-        heat_l2_by_op[op] = std::sqrt(op_heat_norm_sq);
-        normalize_op(op);
+    const std::size_t op_offset = op * config_.state_dim;
+    float op_heat_norm_sq = 0.0F;
+    for (std::size_t i = 0; i < config_.state_dim; ++i) {
+        const float delta = noise(rng);
+        op_bank_[op_offset + i] += delta;
+        op_heat_norm_sq += delta * delta;
     }
-    return heat_l2_by_op;
+    normalize_op(op);
+    return std::sqrt(op_heat_norm_sq);
 }
 
 void Model::normalize_op(std::size_t op) {

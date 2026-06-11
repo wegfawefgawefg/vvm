@@ -23,6 +23,7 @@ enum class TaskKind {
     AlternatingBit,
     Xor,
     SineNext,
+    VideoNext,
     Mnist01,
     Mnist,
 };
@@ -35,6 +36,8 @@ struct TaskSample {
     int class_count = 0;
     std::size_t class_dims = 0;
     std::size_t class_offset = 0;
+    std::size_t visual_input_offset = 0;
+    std::size_t visual_target_offset = 0;
 };
 
 struct TaskDataset {
@@ -67,11 +70,14 @@ struct TaskConfig {
     float affinity_retain_underuse_scale = 0.0F;
     float op_anchor_scale = 0.0F;
     float world_loss_weight = 1.0F;
+    float video_foreground_weight = 0.0F;
+    float video_input_to_output_scale = 0.0F;
     float class_value_scale = 2.0F;
     float class_loss_weight = 0.0F;
     bool backprop_through_state = false;
     VectorRange vector_range = VectorRange::Signed;
     std::string mnist_dir = "resources/mnist";
+    std::string video_frames_dir = "resources/video_frames";
     std::uint32_t seed = 0x51A7E5U;
 };
 
@@ -134,6 +140,9 @@ struct LossPoint {
                                                 const TaskConfig& task_config);
 [[nodiscard]] float evaluate_task_loss(Model& model, std::span<const TaskSample> samples,
                                        const TaskConfig& task_config);
+[[nodiscard]] std::vector<float> target_weights_for_frame(const TaskSample& sample,
+                                                          std::size_t state_dim, std::size_t frame,
+                                                          const TaskConfig& task_config);
 [[nodiscard]] LossPoint train_task_epoch(Model& model, std::span<const TaskSample> train_samples,
                                          std::span<const TaskSample> test_samples,
                                          const TaskConfig& task_config, std::size_t epoch,
